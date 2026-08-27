@@ -1,0 +1,17 @@
+{
+  "name": "maritime-strike",
+  "version": "1.0.0",
+  "description": "16-player team naval combat in the waters around Singapore. Browser-based, no install, no build step.",
+  "type": "commonjs",
+  "private": true,
+  "scripts": {
+    "start": "node server/relay.js",
+    "serve": "node server/relay.js",
+    "test": "node scripts/test-match.mjs",
+    "test:weapons": "node scripts/test-weapons.mjs",
+    "test:smoke": "node scripts/test-smoke.mjs"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}

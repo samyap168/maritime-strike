@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Maritime Strike</title>
+<meta name="description" content="16-player team naval combat in the waters around Singapore. No install.">
+<link rel="stylesheet" href="./src/ui/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>%F0%9F%9A%A2</text></svg>">
+
+<!-- Three.js is vendored, not fetched from a CDN: nothing to fail to load,
+     and the game runs on a laptop with no internet at all. -->
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+<!-- PeerJS exposes window.Peer. Only the WebRTC transport touches it; the
+     ?net=ws fallback works even if this file is missing entirely. -->
+<script src="./vendor/peerjs.min.js"></script>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div id="ui">
+
+  <!-- ------------------------------------------------------------ landing -->
+  <div id="screen-landing" class="screen">
+    <div class="stack">
+      <h1 class="title">Maritime<br>Strike</h1>
+      <p class="subtitle">Team naval combat &middot; Singapore waters</p>
+    </div>
+    <div class="stack">
+      <button class="btn" id="btn-create">Create Game</button>
+      <button class="btn ghost" id="btn-join-screen">Join Game</button>
+    </div>
+    <p class="hint" id="landing-hint">One host, up to 16 players, nothing to install</p>
+    <p class="error" id="landing-error"></p>
+    <!-- Run this in the actual room before the session. Corporate wifi is the
+         one thing that can stop peer-to-peer play, and it is far better to
+         find out beforehand than in front of everybody. -->
+    <button class="btn ghost small" id="btn-nettest">Test connection</button>
+    <p class="hint" id="nettest-result" style="max-width:560px;text-align:center"></p>
+  </div>
+
+  <!-- --------------------------------------------------------------- join -->
+  <div id="screen-join" class="screen hidden">
+    <h2 class="title" style="font-size:clamp(30px,5vw,58px)">Join Game</h2>
+    <div class="stack">
+      <input class="field" id="in-code" placeholder="SG-MARINE-482" autocomplete="off" spellcheck="false">
+      <input class="field" id="in-name" placeholder="Your callsign" maxlength="12" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="row">
+      <button class="btn" id="btn-join">Join</button>
+      <button class="btn ghost" id="btn-back">Back</button>
+    </div>
+    <p class="error" id="join-error"></p>
+  </div>
+
+  <!-- -------------------------------------------------------------- lobby -->
+  <div id="screen-lobby" class="screen hidden">
+    <div class="lobby-wrap">
+      <div class="code-bar">
+        <div>
+          <div class="label">Share this code with your team</div>
+          <div class="code" id="lobby-code">SG-----</div>
+        </div>
+        <div class="row">
+          <button class="btn ghost small" id="btn-copy-code">Copy code</button>
+          <button class="btn ghost small" id="btn-copy-link">Copy link</button>
+        </div>
+      </div>
+
+      <div class="teams">
+        <div class="team red">
+          <h3>Red Team <span id="red-count">0</span></h3>
+          <div id="red-list"></div>
+        </div>
+        <div class="team blue">
+          <h3>Blue Team <span id="blue-count">0</span></h3>
+          <div id="blue-list"></div>
+        </div>
+      </div>
+
+      <div class="lobby-actions">
+        <div class="ready-count">
+          <small>Ready</small>
+          <span id="ready-count">0 / 0</span>
+        </div>
+        <div class="row">
+          <input class="field" id="in-nick" style="width:190px;font-size:15px;padding:10px 14px" maxlength="12" spellcheck="false">
+          <button class="btn ghost small" id="btn-switch">Switch team</button>
+          <button class="btn small" id="btn-ready">Ready up</button>
+          <button class="btn small hidden" id="btn-start">Start game</button>
+        </div>
+      </div>
+      <p class="error" id="lobby-error"></p>
+      <p class="hint" id="lobby-status" style="text-align:center"></p>
+    </div>
+  </div>
+
+  <!-- ---------------------------------------------------------------- end -->
+  <div id="screen-end" class="screen hidden">
+    <div class="winner" id="end-winner">RED TEAM WINS</div>
+    <div class="mvp" id="end-mvp">
+      <span class="l">MVP</span>
+      <span class="n" id="mvp-name">—</span>
+      <span class="s" id="mvp-stat"></span>
+    </div>
+    <div id="end-board" style="width:min(880px,92vw)"></div>
+    <div class="row">
+      <button class="btn" id="btn-again">Play again</button>
+    </div>
+    <p class="hint" id="end-hint">Returning everyone to the lobby</p>
+  </div>
+
+  <!-- ----------------------------------------------------------- tutorial -->
+  <div id="tutorial" class="hidden">
+    <div class="tut-card">
+      <div class="tut-goal">Sink the enemy team</div>
+      <div class="tut-grid">
+        <div><div class="key">W A S D</div><div class="what">Move</div></div>
+        <div><div class="key">MOUSE</div><div class="what">Aim</div></div>
+        <div><div class="key">CLICK</div><div class="what">Fire</div></div>
+        <div><div class="key">TAB</div><div class="what">Scores</div></div>
+      </div>
+      <p class="hint" style="margin-bottom:22px">Drive over a glowing crate to upgrade your vessel and weapon</p>
+      <button class="btn" id="btn-tut-ok">Got it</button>
+    </div>
+  </div>
+
+  <!-- ---------------------------------------------------------------- HUD -->
+  <div id="hud" class="hidden">
+    <div class="hud-score">
+      <span class="r" id="score-red">0</span>
+      <span class="sep">&ndash;</span>
+      <span class="b" id="score-blue">0</span>
+      <span class="alive" id="alive-count"></span>
+    </div>
+    <div class="hud-timer" id="timer"><small>Time</small><span id="timer-val">08:00</span></div>
+    <div class="hud-feed" id="feed"></div>
+    <div class="hud-zone" id="zone"></div>
+
+    <div class="hud-self">
+      <div class="nm" id="self-name">PLAYER</div>
+      <div class="hpbar" id="self-hp"><i style="width:100%"></i><b>100</b></div>
+      <div class="vessel" id="self-vessel">Sampan</div>
+    </div>
+
+    <div class="hud-weapon">
+      <div class="wname" id="weapon-name">Deck rifle</div>
+      <div class="cooldown" id="cooldown"><i></i></div>
+      <div class="state" id="weapon-state"></div>
+      <div class="ctrls">WASD move &middot; Mouse aim &middot; Click fire<br><span id="alt-hint"></span></div>
+    </div>
+
+    <div class="hud-net" id="net">
+      <span>NET <b id="net-mode">RTC</b></span>
+      <span>PING <b id="net-ping">--</b></span>
+      <span>FPS <b id="net-fps">--</b></span>
+    </div>
+  </div>
+
+  <svg id="reticle-svg" class="hidden"></svg>
+  <div id="worldlabels"></div>
+  <div id="toast"></div>
+  <div id="countdown" class="hidden"></div>
+  <div id="sunk" class="hidden">
+    <div class="big">Vessel sunk</div>
+    <div class="sub" id="sunk-sub">Spectating &middot; waiting for the next match</div>
+  </div>
+  <div id="scoreboard" class="hidden"></div>
+  <button class="mute-btn hidden" id="btn-mute" title="Mute (M)">&#128263;</button>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
