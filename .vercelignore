@@ -1,0 +1,5 @@
+# Nothing here is part of the playable site.
+scripts/
+server/
+test-output/
+README.md
