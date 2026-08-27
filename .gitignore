@@ -1,0 +1,4 @@
+# Playwright test output — screenshots the suite writes while running.
+test-output/
+*.png
+node_modules/

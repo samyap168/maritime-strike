@@ -65,7 +65,11 @@ export function transportOptionsFromUrl() {
   const explicit = p.get('relay');
   const secure = location.protocol === 'https:';
   const host = p.get('host') || location.hostname || 'localhost';
-  const port = p.get('port') || (secure ? '' : '8080');
+  // Default to the port the page itself came from: the relay serves the game
+  // and the socket on one port, so hardcoding 8080 breaks the moment anyone
+  // runs it on another. Fall back to 8080 only when the page has no port
+  // (opened from the filesystem, or served on 80/443).
+  const port = p.get('port') || location.port || (secure ? '' : '8080');
 
   return {
     mode,

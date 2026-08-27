@@ -1,8 +1,9 @@
 import { loadChromium, LAUNCH, BASE } from './playwright.mjs';
 const chromium = await loadChromium();
+import { mkdirSync } from 'node:fs';
 
 const URL = process.argv[2] || BASE + '/?range=1';
-const OUT = process.argv[3] || 'shot.png';
+const OUT = process.argv[3] || 'test-output/shot.png';
 const WAIT = Number(process.argv[4] || 6000);
 
 const browser = await chromium.launch(LAUNCH);

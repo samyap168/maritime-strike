@@ -1,6 +1,8 @@
 import { loadChromium, LAUNCH, BASE } from './playwright.mjs';
 const chromium = await loadChromium();
-const SP = process.env.SP || '.';
+import { mkdirSync } from 'node:fs';
+const SP = process.env.SP || 'test-output';
+mkdirSync(SP, { recursive: true });
 const browser = await chromium.launch(LAUNCH);
 const page = await browser.newPage({ viewport: { width: 1440, height: 810 } });
 const errors = [];
