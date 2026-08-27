@@ -13,6 +13,10 @@ import { sampleWaveHeight } from './water.js';
 
 const ADD = { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending };
 
+// Reused so the per-particle colour ramp allocates nothing in the hot path.
+const FIRE_HOT = new THREE.Color(0xff8a2a);
+const FIRE_SMOKE = new THREE.Color(0x3f4247);
+
 /**
  * A soft radial blob, generated once and shared by every foam and splash sprite.
  *
@@ -165,6 +169,19 @@ export class Effects {
       return m;
     });
 
+    // ---- burning hulls -----------------------------------------------------
+    // Flame and smoke share one pool: a smoke puff is just a flame particle
+    // that has been alive longer, which is also how real fire looks.
+    const fireGeo = new THREE.PlaneGeometry(2, 2);
+    this.fires = new Pool(detail ? 80 : 36, () => {
+      const m = mesh(fireGeo, new THREE.MeshBasicMaterial({
+        map: getFoamTexture(), color: 0xff8a2a,
+        transparent: true, depthWrite: false, opacity: 0.9, toneMapped: false,
+      }));
+      this.root.add(m);
+      return m;
+    });
+
     // ---- muzzle flashes ----------------------------------------------------
     this.flashes = new Pool(20, () => {
       const m = mesh(sphere(0.9, 6), new THREE.MeshBasicMaterial({ color: 0xfff0c0, ...ADD, opacity: 1 }));
@@ -215,6 +232,37 @@ export class Effects {
     f.scale.setScalar(scale);
     f.userData.t = 0;
     f.userData.life = 0.09;
+  }
+
+  /**
+   * Emit fire and smoke from a burning hull.
+   *
+   * `intensity` runs 0..1 with how badly the ship is hurt. Called every frame
+   * for every burning vessel, so emission is throttled per-vessel by an
+   * accumulator the caller owns rather than by spawning on every tick.
+   */
+  fireBurst(x, y, z, intensity, scale = 4, heading = 0) {
+    const f = this.fires.acquire();
+    // Spread along the hull rather than from a single point, so the fire looks
+    // like a ship burning rather than a rocket motor bolted to the deck.
+    const along = (Math.random() - 0.5) * scale * 2.4;
+    const across = (Math.random() - 0.5) * scale * 0.7;
+    f.position.set(
+      x + Math.sin(heading) * along + Math.cos(heading) * across,
+      y + Math.random() * 0.5,
+      z + Math.cos(heading) * along - Math.sin(heading) * across
+    );
+    const u = f.userData;
+    u.t = 0;
+    u.life = 0.85 + Math.random() * 0.95;
+    u.rise = 3.2 + Math.random() * 3.0 + intensity * 3.0;
+    u.drift = (Math.random() - 0.5) * 1.8;
+    u.size = scale * (0.40 + Math.random() * 0.34 + intensity * 0.30);
+    u.spin = (Math.random() - 0.5) * 1.4;
+    f.rotation.z = Math.random() * Math.PI;
+    f.material.opacity = 0.9;
+    f.material.color.setHex(0xffb347);
+    f.scale.setScalar(u.size * 0.45);
   }
 
   /** Foam puff dropped behind a moving hull. */
@@ -301,6 +349,30 @@ export class Effects {
       f.scale.setScalar(u.size * (1 + k * 1.2));
       f.material.opacity = Math.max(0, u.peak * (1 - k));
       f.position.y = 0.16 + sampleWaveHeight(f.position.x, f.position.z, t) * 0.9;
+    });
+
+    // Fire: bright and small at birth, then cooling and swelling into smoke.
+    this.fires.forEachActive((f) => {
+      const u = f.userData;
+      u.t += dt;
+      const k = u.t / u.life;
+      if (k >= 1) { this.fires.release(f); return; }
+
+      f.position.y += u.rise * dt * (1 - k * 0.5);
+      f.position.x += u.drift * dt;
+      f.rotation.z += u.spin * dt;
+      // Flame stays tight at the hull; smoke is what billows.
+      f.scale.setScalar(u.size * (k < 0.3 ? 0.45 + k * 0.9 : 0.72 + (k - 0.3) * 2.6));
+
+      // Yellow-hot at the deck, ember orange, then grey smoke well before the
+      // particle dies — otherwise a burning ship reads as a flare, not damage.
+      if (k < 0.14) f.material.color.setHex(0xffe08a);
+      else if (k < 0.30) f.material.color.setHex(0xff8a2a);
+      else f.material.color.lerpColors(
+        FIRE_HOT, FIRE_SMOKE, Math.min(1, (k - 0.30) / 0.30)
+      );
+      f.material.opacity = k < 0.12 ? 0.9 : Math.max(0, 0.62 * (1 - (k - 0.12) / 0.88));
+      if (this.camera) f.quaternion.copy(this.camera.quaternion);
     });
 
     this.flashes.forEachActive((f) => {

@@ -73,10 +73,26 @@ intact.
 A tactical map sits top-right showing terrain, live weapon crates and **your own
 team**. Enemies are deliberately never plotted — that would delete every ambush
 the terrain exists to enable.
-| `M` | Mute |
+| `M` | Mute everything |
+| `V` | Ship's comms on / off |
 
 Audio is muted until you click it on — fifteen laptops unmuting at once is a
 way to lose a room.
+
+**Sound and comms.** A distant naval engagement plays under everything: ocean
+swell, wind, and gunfire and shellbursts over the horizon. Your crew calls out
+what matters — radar contacts, missiles and torpedoes away, hull breaches, fire
+on deck, a kill ("well done, Captain"), and the last ship afloat. Voice uses the
+browser's built-in speech synthesis, so like every other asset here there is
+nothing to download and nothing that can fail to load; a procedural radio click
+either side of each line makes it read as a bridge intercom. Lines are rate-
+limited per type with a global gap and priority, because a vessel that talks
+over itself is worse than one that says nothing. `V` turns comms off on its own
+if you want the game audio without the chatter.
+
+**Damaged ships burn.** Below 55% health a hull starts smoking; the worse the
+damage the more it burns, with flame at the deck cooling into smoke above. It is
+visible across the map, so a wounded ship is a target everyone can see.
 
 ---
 

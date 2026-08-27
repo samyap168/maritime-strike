@@ -42,8 +42,9 @@ export class Audio {
 
   get t() { return this.ctx ? this.ctx.currentTime : 0; }
 
-  _noise(dur, freq, gain, q = 1, sweepTo = null) {
+  _noise(dur, freq, gain, q = 1, sweepTo = null, delay = 0) {
     if (!this.ready || this.muted) return;
+    const t0 = this.t + delay;
     const src = this.ctx.createBufferSource();
     src.buffer = this.noise;
     src.loop = true;
@@ -51,13 +52,40 @@ export class Audio {
     filt.type = 'bandpass';
     filt.frequency.value = freq;
     filt.Q.value = q;
-    if (sweepTo) filt.frequency.exponentialRampToValueAtTime(Math.max(30, sweepTo), this.t + dur);
+    if (sweepTo) filt.frequency.exponentialRampToValueAtTime(Math.max(30, sweepTo), t0 + dur);
     const g = this.ctx.createGain();
-    g.gain.setValueAtTime(gain, this.t);
-    g.gain.exponentialRampToValueAtTime(0.0001, this.t + dur);
+    g.gain.setValueAtTime(gain, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     src.connect(filt).connect(g).connect(this.master);
-    src.start();
-    src.stop(this.t + dur + 0.02);
+    src.start(t0);
+    src.stop(t0 + dur + 0.02);
+  }
+
+  /** Sustained crackle of a burning ship, tracked to how badly it is hurt. */
+  setFireIntensity(level) {
+    if (!this.ready) return;
+    if (level <= 0) {
+      if (this.fireLoop) {
+        try { this.fireLoop.src.stop(); } catch { /* already stopped */ }
+        this.fireLoop = null;
+      }
+      return;
+    }
+    if (!this.fireLoop) {
+      const src = this.ctx.createBufferSource();
+      src.buffer = this.noise;
+      src.loop = true;
+      const filt = this.ctx.createBiquadFilter();
+      filt.type = 'bandpass';
+      filt.frequency.value = 620;
+      filt.Q.value = 0.5;
+      const g = this.ctx.createGain();
+      g.gain.value = 0;
+      src.connect(filt).connect(g).connect(this.master);
+      src.start();
+      this.fireLoop = { src, g };
+    }
+    this.fireLoop.g.gain.setTargetAtTime(0.05 + level * 0.11, this.t, 0.3);
   }
 
   _tone(freq, dur, type = 'sine', gain = 0.2, sweepTo = null, delay = 0) {
@@ -74,6 +102,98 @@ export class Audio {
     osc.connect(g).connect(this.master);
     osc.start(t0);
     osc.stop(t0 + dur + 0.02);
+  }
+
+  // ------------------------------------------------------- battle ambience
+
+  /**
+   * A distant naval engagement, synthesised in three layers: a low swell, a
+   * band of wind, and gunfire and shellbursts somewhere over the horizon.
+   *
+   * It has to sit UNDER the game, not compete with it — the point is that a
+   * quiet moment still feels like a battle is happening elsewhere. Everything
+   * here is deliberately low-gain; if you can pick it out consciously it is
+   * already too loud for a room full of colleagues.
+   */
+  startAmbience() {
+    if (!this.ready || this.ambience) return;
+    const t = this.t;
+
+    // Layer 1 — ocean swell: noise pushed through a low lowpass.
+    const sea = this.ctx.createBufferSource();
+    sea.buffer = this.noise;
+    sea.loop = true;
+    const seaFilter = this.ctx.createBiquadFilter();
+    seaFilter.type = 'lowpass';
+    seaFilter.frequency.value = 380;
+    const seaGain = this.ctx.createGain();
+    seaGain.gain.value = 0.055;
+    sea.connect(seaFilter).connect(seaGain).connect(this.master);
+    sea.start();
+
+    // Layer 2 — wind, slowly breathing so the bed never sits still.
+    const wind = this.ctx.createBufferSource();
+    wind.buffer = this.noise;
+    wind.loop = true;
+    const windFilter = this.ctx.createBiquadFilter();
+    windFilter.type = 'bandpass';
+    windFilter.frequency.value = 820;
+    windFilter.Q.value = 0.7;
+    const windGain = this.ctx.createGain();
+    windGain.gain.value = 0.02;
+    const lfo = this.ctx.createOscillator();
+    lfo.frequency.value = 0.07;
+    const lfoGain = this.ctx.createGain();
+    lfoGain.gain.value = 0.014;
+    lfo.connect(lfoGain).connect(windGain.gain);
+    lfo.start();
+    wind.connect(windFilter).connect(windGain).connect(this.master);
+    wind.start();
+
+    this.ambience = { sea, wind, lfo, seaGain, windGain, timer: null };
+    this._scheduleDistantBattle();
+  }
+
+  /** Gunfire and shellbursts from over the horizon, at irregular intervals. */
+  _scheduleDistantBattle() {
+    if (!this.ambience) return;
+    const gap = 2600 + Math.random() * 6500;
+    this.ambience.timer = setTimeout(() => {
+      if (!this.ambience) return;
+      if (!this.muted && this.ready) {
+        const roll = Math.random();
+        if (roll < 0.45) {
+          // A distant shellburst: heavily filtered, so it reads as far away.
+          this._noise(1.5, 150, 0.10, 0.4, 38);
+          this._tone(46, 1.1, 'sine', 0.055, 24);
+        } else if (roll < 0.8) {
+          // A short salvo.
+          const shots = 2 + Math.floor(Math.random() * 3);
+          for (let i = 0; i < shots; i++) this._noise(0.22, 320, 0.045, 0.6, 110, i * 0.19);
+        } else {
+          // A ship's horn, far off.
+          this._tone(112, 1.3, 'sawtooth', 0.035, 108);
+          this._tone(168, 1.3, 'sine', 0.022, 164);
+        }
+      }
+      this._scheduleDistantBattle();
+    }, gap);
+  }
+
+  stopAmbience() {
+    if (!this.ambience) return;
+    clearTimeout(this.ambience.timer);
+    for (const node of [this.ambience.sea, this.ambience.wind, this.ambience.lfo]) {
+      try { node.stop(); } catch { /* already stopped */ }
+    }
+    this.ambience = null;
+  }
+
+  /** Squelch either side of a voice line, so it reads as a radio, not a robot. */
+  radioClick(tail = false) {
+    if (!this.ready || this.muted) return;
+    this._noise(tail ? 0.09 : 0.05, tail ? 1500 : 2300, tail ? 0.09 : 0.13, 2.0, tail ? 700 : 1400);
+    if (!tail) this._tone(1750, 0.035, 'square', 0.05);
   }
 
   // ---------------------------------------------------------- engine loop
@@ -120,6 +240,7 @@ export class Audio {
     if (!this.engine) return;
     try { this.engine.osc.stop(); } catch { /* already stopped */ }
     this.engine = null;
+    this.setFireIntensity(0);
   }
 
   // ------------------------------------------------------------- one-shots

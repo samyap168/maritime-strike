@@ -27,7 +27,9 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-canvas { display: block; position: fixed; inset: 0; width: 100vw; height: 100vh; }
+/* Scoped to the game canvas by id: a bare `canvas` rule with inset:0 would
+   claim every canvas added later, including the minimap. */
+#c { display: block; position: fixed; inset: 0; width: 100vw; height: 100vh; }
 
 #ui { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
 /* Interactive panels opt back in; full-screen overlays must NOT, or they
@@ -171,7 +173,7 @@ canvas { display: block; position: fixed; inset: 0; width: 100vw; height: 100vh;
 .hud-timer small { display: block; font-size: 10px; letter-spacing: .34em; color: #cfe6f4; text-shadow: 0 1px 6px rgba(0,0,0,.9); }
 
 #minimap {
-  position: absolute; top: 16px; right: 22px;
+  position: absolute; top: 16px; right: 22px; left: auto; bottom: auto;
   width: 190px; height: 190px;
   border: 1px solid var(--line); border-radius: 3px;
   background: rgba(4, 16, 28, .72);
@@ -345,7 +347,7 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600
 .tut-goal { font-size: 20px; font-weight: 700; letter-spacing: .16em; color: var(--amber); margin-bottom: 22px; }
 
 .mute-btn {
-  position: absolute; top: 16px; right: 22px;
+  position: absolute; top: 16px; right: 224px;   /* clear of the minimap */
   width: 34px; height: 34px; border-radius: 3px; cursor: pointer;
   background: rgba(4, 16, 28, .7); border: 1px solid var(--line); color: var(--text);
   font-size: 15px; display: flex; align-items: center; justify-content: center;

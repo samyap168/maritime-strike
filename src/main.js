@@ -14,7 +14,7 @@ import { MSG, EV, encodeSnapshot, encodeInput, decodeInput, newBaseline } from '
 import { HostSim, PHASE } from './net/hostSim.js';
 import { createTicker } from './net/ticker.js';
 import { ClientSync } from './net/clientSync.js';
-import { buildWorld, ZONES } from './game/world.js';
+import { buildWorld, ZONES, lineBlocked } from './game/world.js';
 import { Water, sampleWaveHeight, sampleWaveSlope } from './game/water.js';
 import { buildVessel } from './game/vessels.js';
 import { Effects } from './game/effects.js';
@@ -23,6 +23,7 @@ import { Controls, CameraRig } from './game/controls.js';
 import { HUD } from './ui/hud.js';
 import { LobbyUI } from './ui/lobby.js';
 import { Audio } from './audio/audio.js';
+import { Voice, PRIORITY, pickLine } from './audio/voice.js';
 
 const HOST_PLAYER_ID = 'HOST';
 const params = new URLSearchParams(location.search);
@@ -121,6 +122,7 @@ class Game {
   initUI() {
     this.hud = new HUD(this.camera);
     this.audio = new Audio();
+    this.voice = new Voice(this.audio);
 
     this.ui = new LobbyUI({
       onCreate: () => this.createGame(),
@@ -160,6 +162,7 @@ class Game {
       this.hud.showScoreboard(true, this.lastView, this.me()?.team);
     }
     if (e.code === 'KeyM' && this.phase === PHASE.MATCH) this.toggleMute();
+    if (e.code === 'KeyV' && this.phase === PHASE.MATCH) this.toggleVoice();
     if (e.code === 'Space' && this.phase === PHASE.MATCH && this.me() && !this.me().a) {
       e.preventDefault();
       this.spectateIndex++;
@@ -169,8 +172,26 @@ class Game {
   toggleMute() {
     this.audio.init();
     this.audio.setMuted(!this.audio.muted);
+    this.voice.setMuted(this.audio.muted);
     document.getElementById('btn-mute').innerHTML = this.audio.muted ? '&#128263;' : '&#128266;';
-    if (!this.audio.muted) this.audio.startEngine();
+    if (!this.audio.muted) {
+      this.audio.startEngine();
+      this.audio.startAmbience();
+    } else {
+      this.audio.stopAmbience();
+    }
+  }
+
+  /** Voice has its own toggle: some people want the game audio but not the chatter. */
+  toggleVoice() {
+    this.voice.setEnabled(!this.voice.enabled);
+    this.hud.toast('Ship comms', this.voice.enabled ? 'ON' : 'OFF', 1400);
+  }
+
+  /** Speak a line from the pool, if comms are up. */
+  callout(key, opts = {}) {
+    const text = pickLine(key);
+    if (text) this.voice.say(key, text, opts);
   }
 
   /**
@@ -438,9 +459,19 @@ class Game {
 
       case EV.COUNTDOWN:
         if (ev.n >= 0) { this.hud.countdown(ev.n); this.audio.countdown(ev.n); }
+        if (ev.n === 0) {
+          this.callout('battleStations', { priority: PRIORITY.TACTICAL, cooldown: 30000 });
+          this.callout('helmAhead', { cooldown: 60000 });
+        }
         break;
 
       case EV.FIRE: {
+        // Only your own vessel's weapons are worth a callout.
+        if (ev.id === this.localId) {
+          if (ev.weapon === 'missile') this.callout('missileAway', { cooldown: 14000 });
+          else if (ev.weapon === 'torpedo') this.callout('torpedoAway', { cooldown: 14000 });
+          else if (ev.weapon === 'mine') this.callout('minesLaid', { cooldown: 22000 });
+        }
         if (ev.x === undefined) { this.audio.fire(ev.weapon); break; }
         const dist = this.distanceToLocal(ev.x, ev.z);
         if (dist < 460) {
@@ -463,6 +494,13 @@ class Game {
 
       case EV.KILL: {
         this.hud.addKill(ev);
+        if (ev.killerId && ev.killerId === this.localId) {
+          this.callout('kill', { priority: PRIORITY.TACTICAL, cooldown: 7000 });
+        } else if (ev.victimId === this.localId) {
+          this.callout('sunk', { priority: PRIORITY.URGENT, cooldown: 0 });
+        } else if (this.me() && ev.team === this.me().team) {
+          this.callout('mateLost', { cooldown: 16000 });
+        }
         const victim = (this.lastView && this.lastView.players[ev.victimId]) || this.findByName(ev.victim);
         if (victim) {
           this.effects.explode(victim.x, 3, victim.z, 2.4);
@@ -482,6 +520,7 @@ class Game {
         if (ev.id === this.localId) {
           this.audio.pickup();
           this.hud.toast(`${PICKUP_LABEL[ev.kind]} acquired`, `Vessel upgraded: ${VESSELS[ev.vessel].short}`);
+          this.callout('rearmed', { priority: PRIORITY.TACTICAL, cooldown: 12000 });
         }
         break;
       }
@@ -524,7 +563,9 @@ class Game {
     this.hud.setSunk(false);
     this.iAmSunk = false;
     this.spectateIndex = 0;
-    if (!this.audio.muted) this.audio.startEngine();
+    this.fireState = 0;
+    this.contactSeenAt = 0;
+    if (!this.audio.muted) { this.audio.startEngine(); this.audio.startAmbience(); }
   }
 
   onResult(result) {
@@ -532,7 +573,10 @@ class Game {
     this.controls.enabled = false;
     this.hud.hide();
     const me = this.me();
-    this.audio.matchEnd(me && result.winner === me.team);
+    const won = !!(me && result.winner === me.team);
+    this.audio.matchEnd(won);
+    this.audio.setFireIntensity(0);
+    this.callout(won ? 'victory' : 'defeat', { priority: PRIORITY.URGENT, cooldown: 0 });
     setTimeout(() => this.ui.showResult(result, me && me.team), 900);
   }
 
@@ -656,6 +700,24 @@ class Game {
           m.material.transparent = false;
         }
       });
+
+      // Burning hull. Emission is accumulated per vessel rather than spawned
+      // every frame, so a burning ship costs the same on a 30fps laptop as on
+      // a 144Hz one, and sixteen of them do not drown the particle pool.
+      const hurt = 1 - Math.max(0, Math.min(1, p.hp / CFG.player.maxHp));
+      if (hurt > 0.45 && !submerged) {
+        const intensity = Math.min(1, (hurt - 0.45) / 0.55);
+        node.fireAccum = (node.fireAccum || 0) + dt * (5 + intensity * 14);
+        while (node.fireAccum >= 1) {
+          node.fireAccum -= 1;
+          this.effects.fireBurst(
+            p.x, VESSELS[p.v].beam * 0.35 + 1.2, p.z,
+            intensity, VESSELS[p.v].beam, p.h
+          );
+        }
+      } else {
+        node.fireAccum = 0;
+      }
 
       // Wake foam, emitted per METRE travelled rather than per second. On a
       // timer, a faster vessel lays proportionally more foam, so doubling the
@@ -856,13 +918,43 @@ class Game {
       this.sun.target.updateMatrixWorld();
     }
 
-    // Audio and proximity warnings.
+    // Your own ship's condition: fire crackle plus escalating damage reports.
+    if (alive) {
+      const hurt = 1 - Math.max(0, Math.min(1, self.hp / CFG.player.maxHp));
+      this.audio.setFireIntensity(hurt > 0.45 ? Math.min(1, (hurt - 0.45) / 0.55) : 0);
+
+      // Fire once per threshold crossing, not continuously while below it.
+      const state = self.hp <= 25 ? 3 : self.hp <= 45 ? 2 : self.hp <= 70 ? 1 : 0;
+      if (state > (this.fireState || 0)) {
+        if (state === 1) this.callout('hullBreach', { priority: PRIORITY.TACTICAL, cooldown: 20000 });
+        if (state === 2) this.callout('onFire', { priority: PRIORITY.URGENT, cooldown: 18000 });
+        if (state === 3) this.callout('criticalDamage', { priority: PRIORITY.URGENT, cooldown: 18000 });
+      }
+      this.fireState = state;
+
+      this.checkContacts(view, self);
+
+      // Last ship standing on your side — worth knowing without opening TAB.
+      let mates = 0;
+      for (const id in view.players) {
+        const q = view.players[id];
+        if (q.team === self.team && q.a && q.hp > 0 && id !== this.localId) mates++;
+      }
+      if (mates === 0 && (this._hadMates || false)) {
+        this.callout('lastAfloat', { priority: PRIORITY.TACTICAL, cooldown: 60000 });
+      }
+      this._hadMates = mates > 0;
+    } else {
+      this.audio.setFireIntensity(0);
+    }
+
     if (alive) {
       const frac = Math.min(1, Math.abs(self.s) / (CFG.physics.baseSpeed * VESSELS[self.v].speed));
       this.audio.updateEngine(frac);
       const nearest = MineField.nearestThreat(view.mines || [], self.team, self);
       if (nearest < WEAPONS.mine.revealRange) {
         this.audio.mineWarning(1 - nearest / WEAPONS.mine.revealRange);
+        this.callout('minesNear', { priority: PRIORITY.URGENT, cooldown: 15000 });
       }
       this.hud.setZone(nearestZone(self.x, self.z));
     }
@@ -881,6 +973,40 @@ class Game {
     this.hud.update(view, self, { mode: this.transport ? this.transport.mode : 'off', ping }, dt,
       mousePx, this.controls.lockedTarget);
     if (this.hud.scoreboardOpen) this.hud.showScoreboard(true, view, self && self.team);
+  }
+
+  /**
+   * Radar contact.
+   *
+   * Announces an enemy only when one is genuinely newly relevant: in range, in
+   * line of sight, and not already called. Polled at 4Hz because the line-of-
+   * sight test walks every obstacle and the answer does not change in 16ms.
+   */
+  checkContacts(view, self) {
+    const now = performance.now();
+    if (now - (this._contactCheckedAt || 0) < 250) return;
+    this._contactCheckedAt = now;
+
+    let nearest = Infinity;
+    for (const id in view.players) {
+      const e = view.players[id];
+      if (!e.team || e.team === self.team || !e.a || e.hp <= 0 || e.d) continue;
+      const d = Math.hypot(e.x - self.x, e.z - self.z);
+      if (d > 320 || d >= nearest) continue;
+      if (lineBlocked(self.x, self.z, e.x, e.z)) continue;
+      nearest = d;
+    }
+
+    if (nearest === Infinity) {
+      // Contact lost: re-arm so the next sighting is announced again.
+      if (now - (this.contactSeenAt || 0) > 6000) this.contactHot = false;
+      return;
+    }
+    this.contactSeenAt = now;
+    if (this.contactHot) return;
+    this.contactHot = true;
+    this.callout(nearest < 110 ? 'enemyClose' : 'enemySighted',
+      { priority: PRIORITY.TACTICAL, cooldown: 12000 });
   }
 
   /**
