@@ -12,7 +12,10 @@
  */
 
 import * as THREE from 'three';
-import { mat, mesh, box, cyl, cone, sphere, buildHull, buildGunMount, buildMast } from './geo.js';
+import {
+  mat, mesh, box, cyl, cone, sphere,
+  buildHull, buildGunMount, buildMast, buildRailing, buildBollard, buildRing, mergeStatic,
+} from './geo.js';
 import { VESSELS } from '../config.js';
 
 const PALETTE = {
@@ -43,6 +46,13 @@ function finish(group, kind, teamColor) {
   group.userData.kind = kind;
   group.userData.spinners = group.userData.spinners || [];
   group.userData.wake = group.userData.wake || new THREE.Vector3(0, 0.1, -def.length * 0.45);
+
+  // Fold the static hull and fittings into one mesh per material. The turret
+  // and any spinning radar have to keep their own transforms, so they are
+  // excluded. This is what lets the vessels carry real detail without the
+  // draw-call cost landing on a laptop GPU.
+  mergeStatic(group, [group.userData.turret, ...group.userData.spinners]);
+
   group.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = false; } });
   return group;
 }
@@ -89,6 +99,27 @@ function buildSampan(teamColor) {
   turret.add(mesh(box(0.3, 0.22, 0.5), mat(PALETTE.woodDark), 0, 0.46, -0.15));
   g.add(turret);
   g.userData.turret = turret;
+
+  // Working-boat clutter: the details that say "someone fishes off this".
+  g.add(mesh(box(0.14, 0.16, L * 0.86), mat(PALETTE.woodDark), 0, 1.02, 0));   // rubbing strake
+  for (const side of [1, -1]) {
+    g.add(mesh(box(0.1, 0.16, L * 0.86), mat(PALETTE.woodDark), side * (B / 2 + 0.02), 0.55, 0));
+  }
+  const coil = buildRing(0.34, 0.09, 0xcbb78a);
+  coil.rotation.x = -Math.PI / 2;
+  coil.position.set(0.5, 0.8, L * 0.34);
+  g.add(coil);
+  for (const s2 of [1, -1]) {                                    // stowed oars
+    const oar = mesh(box(0.08, 0.08, 3.4), mat(PALETTE.woodDark), s2 * 0.85, 0.86, -0.4);
+    oar.rotation.x = 0.05;
+    g.add(oar);
+    g.add(mesh(box(0.26, 0.04, 0.9), mat(PALETTE.woodDark), s2 * 0.85, 0.86, -2.3));
+  }
+  g.add(mesh(box(0.7, 0.45, 0.5), mat(0xbfa878), -0.6, 0.94, -1.9));  // fish crates
+  g.add(mesh(box(0.7, 0.45, 0.5), mat(0xbfa878), 0.55, 0.94, -2.4));
+  g.add(mesh(cyl(0.05, 0.05, 2.6, 4), mat(PALETTE.woodDark), -1.0, 1.9, 0.6));  // bamboo pole
+  g.add(mesh(box(0.26, 0.3, 0.26), mat(0xffd98a, { emissive: 0xd89a20, emissiveIntensity: 0.7 }), 0, 1.55, -L * 0.4));
+  g.add(mesh(box(B * 0.7, 0.3, 0.07), mat(0xb03a2e), 0, 0.98, -L * 0.47));      // name board
 
   addTeamMarkings(g, teamColor, L, B, 0.75);
   return finish(g, 'sampan', teamColor);
@@ -141,6 +172,42 @@ function buildPatrol(teamColor) {
   g.add(turret);
   g.userData.turret = turret;
   g.userData.spinners = [mast.userData.spin];
+
+  // Foredeck rails, and the working gear a real patrol boat carries.
+  for (const side of [1, -1]) {
+    const rail = buildRailing(L * 0.32, 0.85, 5);
+    rail.position.set(side * (B / 2 - 0.15), 1.55, L * 0.22);
+    g.add(rail);
+    const r2 = buildRailing(L * 0.26, 0.85, 4);
+    r2.position.set(side * (B / 2 - 0.2), 1.55, -L * 0.30);
+    g.add(r2);
+    // Fenders down the side.
+    for (let i = 0; i < 3; i++) {
+      const f = buildRing(0.30, 0.10, 0x1f2429);
+      f.position.set(side * (B / 2 + 0.04), 1.05, -1.4 + i * 2.1);
+      g.add(f);
+    }
+    g.add(mesh(box(0.5, 0.34, 0.06), mat(PALETTE.glass, { emissive: 0x0d1c28 }), side * (B / 2 - 0.02), 1.0, 1.6));
+  }
+  // Rigid inflatable on the aft deck, on a davit.
+  const rhib = new THREE.Group();
+  rhib.position.set(0, 1.7, -L * 0.30);
+  rhib.add(mesh(buildHull({ length: 3.6, beam: 1.5, draft: 0.3, freeboard: 0.4, sternFullness: 0.95, sheer: 0.2 }), mat(0x3b4148)));
+  for (const s2 of [1, -1]) rhib.add(mesh(cyl(0.19, 0.19, 3.2, 6), mat(0x22262b), s2 * 0.72, 0.35, 0));
+  g.add(rhib);
+  const davit = mesh(box(0.14, 1.5, 0.14), mat(PALETTE.metal), 0, 2.5, -L * 0.42);
+  g.add(davit);
+  g.add(mesh(box(1.4, 0.14, 0.14), mat(PALETTE.metal), 0, 3.2, -L * 0.38));
+  // Life rings, whip antennae, exhaust.
+  for (const s2 of [1, -1]) {
+    const ring = buildRing(0.38, 0.09, 0xff6b35);
+    ring.position.set(s2 * (B / 2 - 0.25), 2.6, 0.9);
+    g.add(ring);
+    g.add(mesh(cyl(0.03, 0.03, 2.2, 4), mat(0x22262b), s2 * 0.7, 4.5, -1.9));
+    g.add(mesh(cyl(0.16, 0.16, 0.6, 6), mat(0x22262b), s2 * 0.9, 1.75, -L * 0.44));
+  }
+  g.add(mesh(sphere(0.5, 8), mat(0xe8eaed), 0, 4.35, -1.4));   // radar dome
+  for (const dz of [L * 0.4, -L * 0.44]) g.add(mesh(box(0.5, 0.3, 0.5), mat(PALETTE.metal), 0, 1.62, dz));
 
   addTeamMarkings(g, teamColor, L, B, 1.55);
   return finish(g, 'patrol', teamColor);
@@ -205,6 +272,39 @@ function buildDestroyer(teamColor) {
   g.add(mesh(box(B * 0.8, 0.2, 5.0), mat(PALETTE.deck), 0, 2.5, -L * 0.36));
   g.add(mesh(cyl(1.5, 1.5, 0.06, 12), mat(0xd8dde2), 0, 2.63, -L * 0.36));
 
+  // Warship furniture: bridge wings, close-in gun, boats, ground tackle.
+  for (const side of [1, -1]) {
+    g.add(mesh(box(B * 0.14, 0.9, 2.2), mat(PALETTE.hullGrey), side * B * 0.44, 5.9, 2.0));  // bridge wing
+    const rail = buildRailing(L * 0.26, 0.9, 6, 0x9aa4ad);
+    rail.position.set(side * (B / 2 - 0.25), 2.55, L * 0.30);
+    g.add(rail);
+    const rail2 = buildRailing(L * 0.24, 0.9, 5, 0x9aa4ad);
+    rail2.position.set(side * (B / 2 - 0.3), 2.55, -L * 0.36);
+    g.add(rail2);
+    // Ship's boats under davits.
+    const boat = mesh(buildHull({ length: 4.6, beam: 1.7, draft: 0.35, freeboard: 0.5, sternFullness: 0.9, sheer: 0.25 }), mat(0xe0e4e8));
+    boat.position.set(side * B * 0.42, 4.2, -3.2);
+    g.add(boat);
+    g.add(mesh(box(0.16, 1.6, 0.16), mat(PALETTE.metal), side * B * 0.5, 5.0, -2.2));
+    g.add(mesh(box(0.16, 1.6, 0.16), mat(PALETTE.metal), side * B * 0.5, 5.0, -4.2));
+    g.add(mesh(box(0.4, 0.5, 0.9), mat(PALETTE.hullDark), side * (B / 2 - 0.1), 2.0, L * 0.44));  // hawse/anchor
+    g.add(mesh(cyl(0.04, 0.04, 3.0, 4), mat(0x22262b), side * 1.2, 9.6, 0.0));
+  }
+  g.add(mesh(box(B * 0.7, 0.55, 0.4), mat(PALETTE.hullGrey), 0, 2.75, L * 0.30));   // breakwater
+  // Close-in weapon system above the helipad.
+  const ciws = new THREE.Group();
+  ciws.position.set(0, 4.4, -L * 0.22);
+  ciws.add(mesh(cyl(0.7, 0.85, 0.9, 8), mat(PALETTE.hullGrey), 0, 0.45, 0));
+  ciws.add(mesh(sphere(0.75, 8), mat(0xe8eaed), 0, 1.3, 0));
+  const cb = mesh(cyl(0.16, 0.16, 1.6, 6), mat(PALETTE.black), 0, 1.2, 0.9);
+  cb.rotation.x = Math.PI / 2;
+  ciws.add(cb);
+  g.add(ciws);
+  // Aft mast and a couple of deck houses.
+  g.add(mesh(cyl(0.1, 0.16, 3.4, 5), mat(PALETTE.metal), 0, 7.0, -6.4));
+  g.add(mesh(box(1.6, 0.12, 0.4), mat(PALETTE.hullGrey), 0, 8.4, -6.4));
+  for (const dz of [-8.2, -10.0]) g.add(mesh(box(B * 0.5, 0.7, 1.2), mat(PALETTE.hullGrey), 0, 2.85, dz));
+
   addTeamMarkings(g, teamColor, L, B, 2.55);
   return finish(g, 'destroyer', teamColor);
 }
@@ -252,6 +352,26 @@ function buildSubmarine(teamColor) {
   for (const dx of [-0.7, 0.7]) turret.add(mesh(cyl(0.3, 0.3, 0.5, 8), mat(PALETTE.black), dx, -0.2, 0.7));
   g.add(turret);
   g.userData.turret = turret;
+
+  // Casing detail: flood ports, cleats, planes, and a shrouded screw.
+  for (const side of [1, -1]) {
+    for (let i = 0; i < 7; i++) {
+      g.add(mesh(box(0.06, 0.34, 0.9), mat(0x14171b), side * (R - 0.05), R * 0.35, -L * 0.28 + i * L * 0.085));
+    }
+    g.add(mesh(box(B * 0.85, 0.14, 1.5), mat(PALETTE.hullDark), side * R * 0.8, -0.2, L * 0.24));  // bow planes
+  }
+  for (const dz of [L * 0.24, -L * 0.20]) {
+    const bol = buildBollard(0.9, 0x14171b);
+    bol.position.set(0, R + 0.14, dz);
+    g.add(bol);
+  }
+  sail.add(mesh(box(B * 0.30, 0.42, 0.08), mat(PALETTE.glass, { emissive: 0x0d1c28 }), 0, 2.1, 1.75));
+  sail.add(mesh(box(B * 0.34, 0.12, 3.7), mat(0x14171b), 0, 2.52, 0));
+  // Towed-array fairing and propulsor shroud.
+  g.add(mesh(box(0.3, 0.24, L * 0.42), mat(0x14171b), 0, -R * 0.55, -L * 0.16));
+  const shroud = mesh(cyl(R * 0.62, R * 0.62, 1.4, 12, 1), mat(0x1b1f24), 0, 0.1, -L * 0.56);
+  shroud.rotation.x = Math.PI / 2;
+  g.add(shroud);
 
   addTeamMarkings(g, teamColor, L * 0.8, B * 0.9, R + 0.3);
   return finish(g, 'submarine', teamColor);
@@ -307,6 +427,37 @@ function buildMinelayer(teamColor) {
   turret.add(mesh(box(1.1, 0.5, 1.6), mat(PALETTE.metal), 0, 0, -0.4));
   g.add(turret);
   g.userData.turret = turret;
+
+  // Working deck: bulwark, winch, fenders, more mines on the rails.
+  for (const side of [1, -1]) {
+    g.add(mesh(box(0.16, 0.9, L * 0.46), mat(PALETTE.rust), side * B * 0.42, 2.3, -L * 0.20));   // bulwark
+    for (let i = 0; i < 4; i++) {
+      const f = buildRing(0.42, 0.13, 0x1f2429);
+      f.position.set(side * (B / 2 + 0.05), 1.15, -3.4 + i * 2.4);
+      g.add(f);
+    }
+    const rail = buildRailing(L * 0.20, 0.8, 4, 0xcfd3d6);
+    rail.position.set(side * (B / 2 - 0.2), 1.9, L * 0.40);
+    g.add(rail);
+  }
+  const winch = mesh(cyl(0.55, 0.55, B * 0.7, 8), mat(PALETTE.metal), 0, 2.5, L * 0.06);
+  winch.rotation.z = Math.PI / 2;   // drum lies athwartships
+  g.add(winch);
+  g.add(mesh(box(B * 0.5, 0.16, 1.6), mat(PALETTE.metal), 0, 1.95, L * 0.14));     // hatch cover
+  g.add(mesh(cyl(0.18, 0.18, 0.9, 6), mat(0x22262b), B * 0.2, 4.1, L * 0.10));     // exhaust
+  // Three more mines, so the rails look loaded rather than nearly empty.
+  const mineMat2 = mat(PALETTE.black);
+  const hornMat2 = mat(PALETTE.orange);
+  for (let i = 0; i < 3; i++) {
+    const m = new THREE.Group();
+    m.position.set(B * 0.22, 2.55, -L * 0.06 - i * 2.4);
+    m.add(mesh(sphere(0.58, 8), mineMat2));
+    for (let h = 0; h < 4; h++) {
+      const a = (h / 4) * Math.PI * 2;
+      m.add(mesh(cyl(0.055, 0.055, 0.42, 4), hornMat2, Math.cos(a) * 0.34, 0.47, Math.sin(a) * 0.34));
+    }
+    g.add(m);
+  }
 
   addTeamMarkings(g, teamColor, L, B, 1.9);
   return finish(g, 'minelayer', teamColor);

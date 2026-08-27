@@ -605,7 +605,7 @@ class Game {
         if (node) this.scene.remove(node.group);
         const group = buildVessel(p.v, TEAMS[p.team].color);
         this.scene.add(group);
-        node = { group, kind: p.v, team: p.team, sinking: null, lastWake: 0 };
+        node = { group, kind: p.v, team: p.team, sinking: null, wakeDist: 0 };
         this.vesselNodes.set(id, node);
       }
 
@@ -657,11 +657,14 @@ class Game {
         }
       });
 
-      // Wake foam, rate-limited by distance travelled rather than by frame.
+      // Wake foam, emitted per METRE travelled rather than per second. On a
+      // timer, a faster vessel lays proportionally more foam, so doubling the
+      // fleet's speed turned every wake into a solid white cloud.
       const speedFrac = Math.min(1, Math.abs(p.s) / (CFG.physics.baseSpeed * VESSELS[p.v].speed));
-      node.lastWake += dt;
-      if (!submerged && speedFrac > 0.12 && node.lastWake > 0.075) {
-        node.lastWake = 0;
+      node.wakeDist = (node.wakeDist || 0) + Math.abs(p.s) * dt;
+      const wakeSpacing = Math.max(3.5, VESSELS[p.v].length * 0.34);
+      if (!submerged && speedFrac > 0.12 && node.wakeDist > wakeSpacing) {
+        node.wakeDist = 0;
         const back = VESSELS[p.v].length * 0.5;
         // Wake scales with the hull that made it — a sampan should not throw
         // the same wall of foam as a destroyer.

@@ -122,6 +122,38 @@ export function buildGunMount(scale, colors) {
   return g;
 }
 
+/**
+ * A run of guard rail: two horizontal rails on stanchions.
+ *
+ * Cheap geometry, and the single detail that most makes a hull read as a real
+ * vessel rather than a solid lump — the eye reads the gap between rail and deck
+ * as scale. Runs along +/-Z, place and rotate as needed.
+ */
+export function buildRailing(length, height, posts, color = 0xd6dade) {
+  const g = new THREE.Group();
+  const m = mat(color);
+  g.add(mesh(box(0.07, 0.07, length), m, 0, height, 0));
+  g.add(mesh(box(0.05, 0.05, length), m, 0, height * 0.55, 0));
+  for (let i = 0; i < posts; i++) {
+    const z = -length / 2 + (i / Math.max(1, posts - 1)) * length;
+    g.add(mesh(box(0.07, height, 0.07), m, 0, height / 2, z));
+  }
+  return g;
+}
+
+/** Mooring bollard / deck cleat. */
+export function buildBollard(scale = 1, color = 0x4a5158) {
+  return mesh(cyl(0.13 * scale, 0.17 * scale, 0.5 * scale, 6), mat(color), 0, 0.25 * scale, 0);
+}
+
+/** A ring of fenders or a coil of rope — small, round, and very "boat". */
+export function buildRing(radius, tube, color) {
+  return new THREE.Mesh(
+    new THREE.TorusGeometry(radius, tube, 4, 10),
+    mat(color)
+  );
+}
+
 /** Radar / mast assembly. */
 export function buildMast(h, colors) {
   const g = new THREE.Group();
@@ -150,16 +182,86 @@ export function buildPalm(rng) {
   return g;
 }
 
-/** Low-poly rock, faceted by jittering an icosahedron. */
+/**
+ * Low-poly rock, faceted by jittering an icosahedron.
+ *
+ * The jitter range matters more than it looks: displacing each vertex
+ * independently over a wide range turns the solid into a starburst of shards.
+ * Kept tight, the same operation reads as a weathered rock mass.
+ */
 export function buildRock(radius, rng) {
   const geo = new THREE.IcosahedronGeometry(radius, 1);
   const p = geo.attributes.position;
+  // Displace along shared directions rather than per-vertex, so neighbouring
+  // vertices move together into facets instead of apart into spikes.
   for (let i = 0; i < p.count; i++) {
-    const s = 0.72 + rng() * 0.55;
-    p.setXYZ(i, p.getX(i) * s, p.getY(i) * s * 0.72, p.getZ(i) * s);
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const lobe = 0.90 + 0.16 * Math.sin(x * 0.35 + rng() * 0.001) * Math.cos(z * 0.31);
+    const s = lobe * (0.96 + rng() * 0.10);
+    p.setXYZ(i, x * s, y * s * 0.80, z * s);
   }
   geo.computeVertexNormals();
   return geo;
+}
+
+/**
+ * Collapse a built vessel's static parts into one mesh per material.
+ *
+ * Detail is cheap in triangles and expensive in DRAW CALLS, and draw calls are
+ * what actually kills integrated laptop GPUs. A detailed hull is ~80 separate
+ * meshes; sixteen of those is ~1300 draw calls per frame before anything else
+ * is drawn. Merging by material takes each vessel to a handful.
+ *
+ * Anything that has to move independently — the turret, spinning radar dishes —
+ * is passed in `keep` and left alone.
+ */
+export function mergeStatic(root, keep = []) {
+  root.updateMatrixWorld(true);
+
+  const keepSet = new Set(keep.filter(Boolean));
+  const isKept = (obj) => {
+    for (let n = obj; n; n = n.parent) if (keepSet.has(n)) return true;
+    return false;
+  };
+
+  const buckets = new Map();
+  const doomed = [];
+
+  root.traverse((obj) => {
+    if (!obj.isMesh || obj.isInstancedMesh || isKept(obj)) return;
+    const m = obj.material;
+    // Materials differing in any of these cannot share a draw call.
+    const key = [
+      m.color.getHex(), m.emissive ? m.emissive.getHex() : 0,
+      m.emissiveIntensity ?? 1, m.transparent ? 1 : 0, m.opacity,
+    ].join('|');
+
+    let bucket = buckets.get(key);
+    if (!bucket) { bucket = { material: m, pos: [], nrm: [] }; buckets.set(key, bucket); }
+
+    const geo = (obj.geometry.index ? obj.geometry.toNonIndexed() : obj.geometry.clone());
+    geo.applyMatrix4(obj.matrixWorld);   // root sits at identity while building
+    const pos = geo.attributes.position.array;
+    const nrm = geo.attributes.normal ? geo.attributes.normal.array : null;
+    for (let i = 0; i < pos.length; i++) bucket.pos.push(pos[i]);
+    if (nrm) for (let i = 0; i < nrm.length; i++) bucket.nrm.push(nrm[i]);
+    else for (let i = 0; i < pos.length; i++) bucket.nrm.push(0);
+    geo.dispose();
+    doomed.push(obj);
+  });
+
+  for (const obj of doomed) obj.removeFromParent();
+
+  for (const bucket of buckets.values()) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(bucket.pos, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(bucket.nrm, 3));
+    geo.computeBoundingSphere();
+    const merged = new THREE.Mesh(geo, bucket.material);
+    merged.castShadow = true;
+    root.add(merged);
+  }
+  return root;
 }
 
 /** Deterministic PRNG so every browser generates an identical map. */

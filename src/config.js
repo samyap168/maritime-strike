@@ -30,8 +30,11 @@ export const CFG = {
   },
 
   physics: {
-    baseSpeed: 22,     // m/s at 1.0x
-    baseTurn: 0.95,    // rad/s at 1.0x
+    baseSpeed: 44,     // m/s at 1.0x
+    // Turn rate scales with the speed increase on purpose: turning radius is
+    // speed / turn rate, so doubling speed alone would double every turning
+    // circle and make the whole fleet feel like it is on rails.
+    baseTurn: 1.60,    // rad/s at 1.0x
     accel: 14,
     reverseFactor: 0.45,
     // A vessel at a standstill turns sluggishly; at speed it carves.
@@ -111,7 +114,9 @@ export const WEAPONS = {
   },
   mine: {
     id: 'mine', name: 'SEA MINES', kind: 'mine',
-    damage: 55, cooldown: 4.0, maxLive: 6,
+    // Ten times the lay rate, and a matching cap — leaving maxLive at 6 would
+    // have made the faster cooldown meaningless after the first two seconds.
+    damage: 55, cooldown: 0.4, maxLive: 20,
     triggerRadius: 9, revealRange: 25, armDelay: 1.2, life: 90,
   },
 };

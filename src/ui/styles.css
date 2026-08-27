@@ -170,7 +170,16 @@ canvas { display: block; position: fixed; inset: 0; width: 100vw; height: 100vh;
 @keyframes pulse { 50% { opacity: .45 } }
 .hud-timer small { display: block; font-size: 10px; letter-spacing: .34em; color: #cfe6f4; text-shadow: 0 1px 6px rgba(0,0,0,.9); }
 
-.hud-feed { top: 16px; right: 22px; display: flex; flex-direction: column; gap: 5px; align-items: flex-end; }
+#minimap {
+  position: absolute; top: 16px; right: 22px;
+  width: 190px; height: 190px;
+  border: 1px solid var(--line); border-radius: 3px;
+  background: rgba(4, 16, 28, .72);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, .35);
+}
+
+/* The feed sits under the map rather than fighting it for the corner. */
+.hud-feed { top: 222px; right: 22px; display: flex; flex-direction: column; gap: 5px; align-items: flex-end; }
 .feed-row {
   display: flex; align-items: center; gap: 8px;
   background: rgba(4, 16, 28, .78); border-right: 3px solid var(--k);

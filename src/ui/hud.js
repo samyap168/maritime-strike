@@ -10,7 +10,8 @@
  */
 
 import * as THREE from 'three';
-import { VESSELS, WEAPONS, TEAMS } from '../config.js';
+import { VESSELS, WEAPONS, TEAMS, CFG } from '../config.js';
+import { OBSTACLES, PICKUP_SPOTS } from '../game/world.js';
 import { escapeHtml } from './lobby.js';
 
 const $ = (id) => document.getElementById(id);
@@ -38,6 +39,7 @@ export class HUD {
     this.platePool = this._pool(20, 'wl plate');
 
     this._buildReticle();
+    this._initMinimap();
 
     // The tutorial is a full-screen modal, so while it is up it swallows every
     // click meant for the canvas. Make it trivially dismissable — a first-timer
@@ -74,6 +76,110 @@ export class HUD {
     return it;
   }
 
+  /**
+   * Tactical map.
+   *
+   * Shows your own vessel and your TEAM only. Plotting enemies would turn the
+   * map into a wallhack and delete every ambush the terrain exists to enable —
+   * the point is coordinating with your side, not seeing through islands.
+   *
+   * Terrain is drawn once into an offscreen canvas and blitted each frame, so
+   * the per-frame cost is one drawImage plus a handful of dots.
+   */
+  _initMinimap() {
+    this.mmCanvas = $('minimap');
+    if (!this.mmCanvas) return;
+    this.mmCtx = this.mmCanvas.getContext('2d');
+    const S = this.mmCanvas.width;
+    this.mmSize = S;
+    this.mmScale = S / CFG.map.size;
+
+    const terrain = document.createElement('canvas');
+    terrain.width = terrain.height = S;
+    const t = terrain.getContext('2d');
+
+    t.fillStyle = '#0a2438';
+    t.fillRect(0, 0, S, S);
+
+    const COLOR = {
+      island: '#3f7d44', mangrove: '#2f6b46', rock: '#6e7069',
+      quay: '#8b8f95', ship: '#b0663a', jetty: '#8a6f4a',
+    };
+    for (const o of OBSTACLES) {
+      // A ship is a chain of circles; drawing each one paints the whole hull.
+      t.fillStyle = COLOR[o.type] || '#6e7069';
+      t.beginPath();
+      t.arc(this._mmX(o.x), this._mmY(o.z), Math.max(1.5, o.r * this.mmScale), 0, Math.PI * 2);
+      t.fill();
+    }
+
+    t.strokeStyle = 'rgba(120,190,230,.25)';
+    t.lineWidth = 2;
+    t.strokeRect(1, 1, S - 2, S - 2);
+
+    this.mmTerrain = terrain;
+  }
+
+  _mmX(x) { return (x + CFG.map.half) * this.mmScale; }
+  _mmY(z) { return (z + CFG.map.half) * this.mmScale; }
+
+  updateMinimap(view, self) {
+    if (!this.mmCtx || !this.mmTerrain) return;
+    const c = this.mmCtx;
+    const S = this.mmSize;
+    c.clearRect(0, 0, S, S);
+    c.drawImage(this.mmTerrain, 0, 0);
+
+    // Active weapon crates, so the team can call out what is up for grabs.
+    const mask = view.pickupMask || '';
+    const KIND = { rifle: '#3fd67a', missile: '#ff5a4d', torpedo: '#36c8e8', mine: '#ffa726' };
+    for (let i = 0; i < PICKUP_SPOTS.length; i++) {
+      if (mask && mask[i] !== '1') continue;
+      const s = PICKUP_SPOTS[i];
+      c.fillStyle = KIND[s.kind] || '#fff';
+      c.beginPath();
+      c.arc(this._mmX(s.x), this._mmY(s.z), 5, 0, Math.PI * 2);
+      c.fill();
+    }
+
+    if (!self || !self.team) return;
+    const teamHex = TEAMS[self.team].hex;
+
+    for (const id in view.players) {
+      const p = view.players[id];
+      if (p.team !== self.team || id === this.localId) continue;
+      const alive = p.a && p.hp > 0;
+      c.fillStyle = alive ? teamHex : 'rgba(140,150,160,.45)';
+      c.beginPath();
+      c.arc(this._mmX(p.x), this._mmY(p.z), alive ? 7 : 4.5, 0, Math.PI * 2);
+      c.fill();
+      if (alive) {
+        c.strokeStyle = 'rgba(0,0,0,.55)';
+        c.lineWidth = 2;
+        c.stroke();
+      }
+    }
+
+    // You: an arrow, because heading is what you actually need off a map.
+    const x = this._mmX(self.x), y = this._mmY(self.z);
+    const fx = Math.sin(self.h), fy = Math.cos(self.h);
+    c.save();
+    c.translate(x, y);
+    c.rotate(Math.atan2(fx, -fy));
+    c.fillStyle = '#ffffff';
+    c.strokeStyle = 'rgba(0,0,0,.7)';
+    c.lineWidth = 2;
+    c.beginPath();
+    c.moveTo(0, -12);
+    c.lineTo(8, 9);
+    c.lineTo(0, 4);
+    c.lineTo(-8, 9);
+    c.closePath();
+    c.fill();
+    c.stroke();
+    c.restore();
+  }
+
   _buildReticle() {
     this.reticle = $('reticle-svg');
     this.reticle.innerHTML = `
@@ -93,12 +199,14 @@ export class HUD {
   show(localId) {
     this.localId = localId;
     $('hud').classList.remove('hidden');
+    if (this.mmCanvas) this.mmCanvas.style.display = '';
     this.reticle.classList.remove('hidden');
     $('btn-mute').classList.remove('hidden');
   }
 
   hide() {
     $('hud').classList.add('hidden');
+    if (this.mmCanvas) this.mmCanvas.style.display = 'none';
     this.reticle.classList.add('hidden');
     $('sunk').classList.add('hidden');
     this.showScoreboard(false);
@@ -186,6 +294,7 @@ export class HUD {
       }
     }
 
+    this.updateMinimap(view, self);
     this.updatePlates(view, self);
     this.updateDamage(dt);
     this.updateFeed(now);

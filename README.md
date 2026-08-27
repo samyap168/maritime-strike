@@ -64,11 +64,15 @@ intact.
 | Input | Action |
 |---|---|
 | `W` / `S` | Throttle forward / reverse |
-| `A` / `D` | Turn |
+| `A` / `D` | Turn left / turn right |
 | Mouse | Aim (semi-automatic assist) |
 | Left click | Fire |
 | `SHIFT` | Submerge (submarine) / lay mine (minelayer) |
 | `TAB` (hold) | Scoreboard |
+
+A tactical map sits top-right showing terrain, live weapon crates and **your own
+team**. Enemies are deliberately never plotted — that would delete every ambush
+the terrain exists to enable.
 | `M` | Mute |
 
 Audio is muted until you click it on — fifteen laptops unmuting at once is a
@@ -88,7 +92,7 @@ ability, never in survivability.
 | **Coast Guard Patrol** | Rifle crate | Twin autocannon | **1.30×** | 6 | Fastest hull; the guns overheat |
 | **Missile Destroyer** | Missile pod | Guided missile | **0.70×** | 34 + splash | Longest reach; soft lock-on |
 | **Submarine** | Torpedo tube | Torpedo | 0.95× | 40 | `SHIFT` to dive — immune to everything but torpedoes, and cannot fire while under |
-| **Minelayer** | Mine crate | Sea mines | 1.00× | 55 on contact | **No direct fire at all.** Denies whole channels |
+| **Minelayer** | Mine crate | Sea mines | 1.00× | 55 on contact | **No direct fire at all.** Lays a mine every 0.4s, 20 live at once — it can close a whole channel |
 
 Mines are invisible to the enemy beyond 25 m; inside that they get a ripple and
 a rising warning tone. Your own team always sees them.

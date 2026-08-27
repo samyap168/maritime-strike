@@ -12,7 +12,7 @@
  */
 
 import * as THREE from 'three';
-import { mat, mesh, box, cyl, cone, buildRock, buildPalm, mulberry32 } from './geo.js';
+import { mat, mesh, box, cyl, cone, buildRock, buildPalm, buildHull, mulberry32 } from './geo.js';
 import { CFG } from '../config.js';
 
 const HALF = CFG.map.half;
@@ -36,56 +36,123 @@ const push = (x, z, r, type, extra = {}) => { OBSTACLES.push({ x, z, r, type, ..
 
 const rng = mulberry32(0x5EA10FF);
 
+/**
+ * A long vessel is a CHAIN of collision circles, not one big one.
+ *
+ * A single circle around a 150m container ship would wall off a huge disc of
+ * open water and still not feel like a ship. A line of small circles gives
+ * cover that is long and thin — you can run its length, break line of sight,
+ * and come out the far end — which is exactly the kind of cover a naval fight
+ * wants. Only the first circle carries the visual; it renders at the ship's
+ * true centre via cx/cz.
+ */
+function pushShip(x, z, angle, length, beam, extra = {}) {
+  const r = beam / 2;
+  const n = Math.max(2, Math.round((length - beam) / (r * 1.35)) + 1);
+  const step = n > 1 ? (length - beam) / (n - 1) : 0;
+  for (let i = 0; i < n; i++) {
+    const d = -length / 2 + r + i * step;
+    OBSTACLES.push({
+      x: x + Math.sin(angle) * d,
+      z: z + Math.cos(angle) * d,
+      r,
+      type: 'ship',
+      render: i === 0,
+      cx: x, cz: z, angle, length, beam,
+      ...extra,
+    });
+  }
+}
+
 // --- MARINA BAY: long sight-lines, the destroyer's ground ---------------------
-const marinaIsle = push(300, -300, 66, 'island', { h: 7 });
-push(215, -372, 20, 'island', { h: 5, wheel: true });
+const marinaIsle = push(300, -300, 88, 'island', { h: 7 });
+push(205, -388, 26, 'island', { h: 5, wheel: true });
 
 // --- KEPPEL YARDS: the best hard cover on the map, a maze at water level ------
-push(-395, 40, 58, 'quay', { h: 6 });
-push(-320, -30, 40, 'quay', { h: 6 });
-push(-320, 110, 40, 'quay', { h: 6 });
-push(-252, -25, 16, 'barge', { h: 3.4, rot: 0.2 });
-push(-250, 108, 16, 'barge', { h: 3.4, rot: -0.15 });
+push(-400, 40, 76, 'quay', { h: 6 });
+push(-318, -50, 54, 'quay', { h: 6 });
+push(-318, 130, 54, 'quay', { h: 6 });
+// Two container ships berthed alongside — long, solid, and the best cover on
+// the map to fight around.
+pushShip(-232, -40, 0.12, 190, 30, { h: 9, containers: true });
+pushShip(-230, 132, -0.10, 165, 28, { h: 8.5, containers: true });
 
 // --- KRANJI SHOALS: tight winding channels, ambush country --------------------
 for (let i = 0; i < 15; i++) {
   const a = (i / 15) * Math.PI * 2 + rng() * 0.7;
   const d = 45 + rng() * 135;
-  push(-60 + Math.cos(a) * d * 1.35, -420 + Math.sin(a) * d * 0.62, 13 + rng() * 15, 'mangrove', { h: 4.5 + rng() * 2.5, seed: rng() });
+  push(-60 + Math.cos(a) * d * 1.45, -420 + Math.sin(a) * d * 0.66, 18 + rng() * 21, 'mangrove', { h: 5.5 + rng() * 3.5, seed: rng() });
 }
 
 // --- SISTERS ROCKS: broken sight-lines through the middle --------------------
 for (let i = 0; i < 11; i++) {
   const a = (i / 11) * Math.PI * 2 + rng() * 0.9;
   const d = 55 + rng() * 175;
-  push(40 + Math.cos(a) * d, 30 + Math.sin(a) * d * 0.85, 9 + rng() * 15, 'rock', { h: 6 + rng() * 12, seed: rng() });
+  push(40 + Math.cos(a) * d * 1.1, 30 + Math.sin(a) * d * 0.92, 15 + rng() * 15, 'rock', { h: 8 + rng() * 12, seed: rng() });
 }
 
 // --- PALAWAN CAY: southern resort island -------------------------------------
-push(170, 330, 72, 'island', { h: 8, palms: true });
-push(170, 252, 9, 'jetty', { h: 2 });
+push(175, 340, 94, 'island', { h: 8, palms: true });
+push(175, 238, 11, 'jetty', { h: 2 });
 
 // --- THE ANCHORAGE: cover in open water, so mid-map is not a kill zone --------
-push(400, 170, 30, 'barge', { h: 6.5, big: true, rot: 0.35 });
-push(470, 250, 24, 'barge', { h: 5.5, rot: -0.2 });
-push(330, 235, 22, 'barge', { h: 5.0, rot: 0.9 });
-push(455, 95, 20, 'barge', { h: 5.0, rot: -0.6 });
+// Moored shipping: the reason the middle of the map is worth fighting over.
+pushShip(410, 170, 0.35, 230, 36, { h: 11, tanker: true });
+pushShip(470, 300, -0.25, 175, 30, { h: 9, containers: true });
+pushShip(320, 265, 1.05, 150, 26, { h: 8, containers: true });
+pushShip(470, 70, -0.70, 160, 28, { h: 9, tanker: true });
 
 // --- MERLION CAY --------------------------------------------------------------
-push(-190, -160, 24, 'island', { h: 5, merlion: true });
+push(-195, -165, 30, 'island', { h: 5, merlion: true });
 
 // --- Scattered outlying rocks, to soften the map edges ------------------------
 for (let i = 0; i < 9; i++) {
   const a = rng() * Math.PI * 2, d = 330 + rng() * 210;
   const x = Math.cos(a) * d, z = Math.sin(a) * d;
   if (Math.abs(x) > HALF - 60 || Math.abs(z) > HALF - 60) continue;
-  push(x, z, 8 + rng() * 12, 'rock', { h: 5 + rng() * 9, seed: rng() });
+  push(x, z, 12 + rng() * 13, 'rock', { h: 7 + rng() * 9, seed: rng() });
 }
+
+// Two derelicts in otherwise empty water, so no crossing is a completely naked run.
+pushShip(-420, 330, 0.8, 170, 28, { h: 8, containers: true });
+pushShip(120, -140, -0.5, 145, 26, { h: 8, tanker: true });
 
 /** Non-colliding navigation buoys: orientation aids and micro-cover. */
 export const BUOYS = [];
 for (let i = 0; i < 26; i++) {
   BUOYS.push({ x: (rng() - 0.5) * 2 * (HALF - 50), z: (rng() - 0.5) * 2 * (HALF - 50), t: rng() });
+}
+
+/**
+ * Move a point to the nearest clear water.
+ *
+ * Obstacle sizes get tuned constantly, and without this, enlarging an island
+ * silently swallows a weapon pickup or a spawn slot and nobody notices until a
+ * match is underway. The spiral is deterministic, so every client resolves the
+ * identical position without any of it going over the wire.
+ */
+export function nudgeToClearWater(x, z, clearance) {
+  const isClear = (px, pz) => {
+    if (Math.abs(px) > HALF - clearance || Math.abs(pz) > HALF - clearance) return false;
+    for (const o of OBSTACLES) {
+      const dx = px - o.x, dz = pz - o.z;
+      const min = o.r + clearance;
+      if (dx * dx + dz * dz < min * min) return false;
+    }
+    return true;
+  };
+  if (isClear(x, z)) return { x, z };
+  for (let ring = 1; ring <= 40; ring++) {
+    const radius = ring * 11;
+    const steps = 8 + ring * 4;
+    for (let i = 0; i < steps; i++) {
+      const a = (i / steps) * Math.PI * 2;
+      const px = x + Math.cos(a) * radius;
+      const pz = z + Math.sin(a) * radius;
+      if (isClear(px, pz)) return { x: px, z: pz };
+    }
+  }
+  return { x, z };   // nowhere clear within range; better than looping forever
 }
 
 /** Twelve pickup spawns, weighted toward contested ground and away from spawns. */
@@ -103,6 +170,13 @@ export const PICKUP_SPOTS = [
   { x: 60, z: -455, kind: 'rifle' },
   { x: 455, z: -345, kind: 'missile' },
 ];
+
+// Keep every crate reachable, whatever the terrain around it has grown into.
+for (const spot of PICKUP_SPOTS) {
+  const clear = nudgeToClearWater(spot.x, spot.z, 18);
+  spot.x = clear.x;
+  spot.z = clear.z;
+}
 
 /** Team spawn areas — open water, diagonally opposed, with cover on the routes. */
 export const SPAWNS = {
@@ -160,7 +234,7 @@ export function edgePressure(x, z) {
 // ------------------------------------------------------------------ rendering
 
 const C = {
-  sand: 0xdcc9a0, grass: 0x4f8a52, rock: 0x8b8d86, rockDark: 0x6e7069,
+  sand: 0xdcc9a0, grass: 0x4f8a52, rock: 0x77786f, rockDark: 0x585a52,
   mangrove: 0x2f6b46, concrete: 0xb9bcc0, steel: 0x8e959c, dark: 0x3a4048,
   glassTower: 0x9fc4d8, gold: 0xd6b45a, white: 0xeceff1,
 };
@@ -266,6 +340,84 @@ function buildCrane() {
   return g;
 }
 
+/**
+ * A moored merchant ship — the map's long-form cover.
+ *
+ * Built on the same parametric hull as the player vessels, just at a very
+ * different scale, so the shipping and the fleet look like they belong to one
+ * world. Two fits: a container ship stacked high enough to break line of sight
+ * completely, and a lower tanker you can shoot over but not through.
+ */
+function buildMooredShip(o, r2) {
+  const g = new THREE.Group();
+  const L = o.length, B = o.beam;
+
+  const hull = mesh(buildHull({
+    length: L, beam: B,
+    draft: o.h * 0.42, freeboard: o.h * 0.85,
+    sternFullness: 0.93, sheer: B * 0.05, bowRise: 0.5, stations: 22,
+  }), mat(o.tanker ? 0x2f4f6d : 0x7a4038));
+  g.add(hull);
+
+  const deckY = o.h * 0.85;
+  // No boot-topping stripe: a straight box cannot follow this hull's taper, so
+  // at any length that reads as a stripe it also pokes out past the bow and
+  // stern as a black bar floating on the water. The hull colour carries it.
+  
+
+  // Deckhouse and funnel, aft, where they always are.
+  const houseH = o.h * 1.5;
+  g.add(mesh(box(B * 0.66, houseH, L * 0.09), mat(0xe6e8ea), 0, deckY + houseH / 2, -L * 0.38));
+  g.add(mesh(box(B * 0.70, 0.6, L * 0.10), mat(0x2b313a), 0, deckY + houseH, -L * 0.38));
+  g.add(mesh(box(B * 0.60, 1.0, 0.5), mat(0x2a4a63, { emissive: 0x0d1c28 }), 0, deckY + houseH * 0.78, -L * 0.335));
+  g.add(mesh(box(B * 0.26, o.h * 0.9, B * 0.22), mat(0x22262b), 0, deckY + houseH + o.h * 0.45, -L * 0.44));
+  g.add(mesh(cyl(0.12, 0.12, o.h * 1.1, 5), mat(0xb9bcc0), 0, deckY + houseH + o.h * 0.55, -L * 0.38));
+
+  if (o.tanker) {
+    // Pipework and manifold along an otherwise flat deck.
+    g.add(mesh(box(B * 0.10, 0.7, L * 0.62), mat(0xc9ccce), 0, deckY + 0.7, L * 0.04));
+    for (let i = 0; i < 7; i++) {
+      const z = -L * 0.24 + (i / 6) * L * 0.56;
+      g.add(mesh(cyl(B * 0.14, B * 0.14, 1.0, 10), mat(0xd8dbde), 0, deckY + 0.5, z));
+      if (i % 2 === 0) g.add(mesh(box(B * 0.5, 0.5, 0.5), mat(0xa8adb2), 0, deckY + 1.1, z));
+    }
+    g.add(mesh(box(B * 0.8, 1.4, 2.0), mat(0xd8892b), 0, deckY + 1.4, L * 0.06));
+  } else {
+    // Container stacks: the actual line-of-sight blocker.
+    const colors = [0xc0392b, 0x2980b9, 0xd68910, 0x27ae60, 0x7f8c8d, 0x8e44ad, 0x16a085];
+    const bays = Math.max(4, Math.round(L / (B * 0.75)));
+    for (let bay = 0; bay < bays; bay++) {
+      const z = -L * 0.30 + (bay / (bays - 1)) * L * 0.62;
+      const across = 3;
+      for (let c = 0; c < across; c++) {
+        const stack = 2 + Math.floor(r2() * 3);
+        for (let k = 0; k < stack; k++) {
+          g.add(mesh(
+            box(B * 0.26, 2.6, L / bays * 0.82),
+            mat(colors[Math.floor(r2() * colors.length)]),
+            (c - (across - 1) / 2) * B * 0.29,
+            deckY + 1.4 + k * 2.7,
+            z
+          ));
+        }
+      }
+    }
+    // Deck cranes forward.
+    for (const cz of [L * 0.30, L * 0.14]) {
+      const c = new THREE.Group();
+      c.position.set(0, deckY, cz);
+      c.add(mesh(cyl(B * 0.06, B * 0.09, o.h * 1.5, 6), mat(0xd8892b), 0, o.h * 0.75, 0));
+      const boom = mesh(box(1.0, 1.0, L * 0.18), mat(0xd8892b), 0, o.h * 1.5, L * 0.06);
+      boom.rotation.x = -0.5;
+      c.add(boom);
+      g.add(c);
+    }
+  }
+
+  g.rotation.y = o.angle;
+  return g;
+}
+
 /** Container stacks — instanced, because there are hundreds of them. */
 function buildContainerField(r2, spots) {
   const geo = box(6.2, 2.7, 12.4);
@@ -342,7 +494,7 @@ export function buildWorld(quality = 'high') {
       // clearly above a destroyer's superstructure without becoming a sea stack
       // that dwarfs the whole fight.
       const main = mesh(buildRock(o.r * 0.86, rr), mat(C.rock), 0, o.r * 0.18, 0);
-      main.scale.y = 0.72 + rr() * 0.3;
+      main.scale.y = 0.66 + rr() * 0.24;
       node.add(main);
       const peaks = detail ? (o.r > 13 ? 3 : 2) : 1;
       for (let i = 1; i < peaks; i++) {
@@ -385,19 +537,10 @@ export function buildWorld(quality = 'high') {
       }
     }
 
-    else if (o.type === 'barge') {
-      node = new THREE.Group();
-      const L = o.r * 2.1, B = o.r * 1.1;
-      node.add(mesh(box(B, o.h * 0.6, L), mat(o.big ? 0x2f4f6d : 0x6d5b47), 0, o.h * 0.2, 0));
-      node.add(mesh(box(B * 1.04, 0.5, L * 1.01), mat(C.dark), 0, o.h * 0.5, 0));
-      if (o.big) {
-        // Moored tanker: deck house aft, pipework forward.
-        node.add(mesh(box(B * 0.8, o.h * 0.9, L * 0.2), mat(C.white), 0, o.h * 0.85, -L * 0.36));
-        for (let i = 0; i < 4; i++) node.add(mesh(cyl(B * 0.16, B * 0.16, 1.4, 8), mat(0xc9ccce), 0, o.h * 0.6, -L * 0.15 + i * L * 0.16));
-      } else if (detail) {
-        node.add(buildContainerField(r2, [{ x: 0, z: 0, y: o.h * 0.5, count: 6 }]));
-      }
-      node.rotation.y = o.rot || 0;
+    else if (o.type === 'ship') {
+      // Only the chain's anchor circle carries the mesh; the rest are collision.
+      if (!o.render) continue;
+      node = buildMooredShip(o, r2);
     }
 
     else if (o.type === 'jetty') {
@@ -411,8 +554,8 @@ export function buildWorld(quality = 'high') {
     }
 
     if (node) {
-      node.position.x = o.x;
-      node.position.z = o.z;
+      node.position.x = o.type === 'ship' ? o.cx : o.x;
+      node.position.z = o.type === 'ship' ? o.cz : o.z;
       node.traverse((m) => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
       root.add(node);
     }
@@ -464,6 +607,8 @@ export function buildShoreMask(size = 512) {
   };
 
   for (const o of OBSTACLES) {
+    // Moored ships float; they do not create shallows or a beach.
+    if (o.type === 'ship') continue;
     const px = toPx(o.x), pz = toPx(o.z);
     const pr = (o.r / (HALF * 2)) * size;
     // GREEN: the wide shallow shelf that turns the water turquoise.
@@ -484,8 +629,10 @@ export function spawnFor(team, index) {
   const ring = Math.floor(index / 4);
   const a = base.facing + ((index % 4) - 1.5) * 0.5;
   const d = CFG.player.spawnSpread * (0.55 + ring * 0.5);
-  let x = base.x + Math.cos(a) * d;
-  let z = base.z + Math.sin(a) * d;
-  const fixed = resolveCollision(x, z, 10);
-  return { x: fixed.x, z: fixed.z, heading: Math.atan2(-base.x, -base.z) };
+  const x = base.x + Math.cos(a) * d;
+  const z = base.z + Math.sin(a) * d;
+  // Clear water, not merely "pushed out of the hull" — spawning flush against a
+  // moored ship is barely better than spawning inside it.
+  const clear = nudgeToClearWater(x, z, 16);
+  return { x: clear.x, z: clear.z, heading: Math.atan2(-base.x, -base.z) };
 }

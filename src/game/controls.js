@@ -81,7 +81,10 @@ export class Controls {
 
     return {
       throttle: (this.keys.fwd ? 1 : 0) - (this.keys.back ? 1 : 0),
-      turn: (this.keys.right ? 1 : 0) - (this.keys.left ? 1 : 0),
+      // Increasing heading rotates the hull toward screen-LEFT under the chase
+      // camera, so A must produce the positive value. Getting this backwards is
+      // the single most disorienting bug a driving game can ship.
+      turn: (this.keys.left ? 1 : 0) - (this.keys.right ? 1 : 0),
       aim,
       fire: this.firing,
       alt: !!this.keys.alt,
