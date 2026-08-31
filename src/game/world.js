@@ -243,7 +243,8 @@ export function edgePressure(x, z) {
 // ------------------------------------------------------------------ rendering
 
 const C = {
-  sand: 0xdcc9a0, grass: 0x4f8a52, rock: 0x77786f, rockDark: 0x585a52,
+  sand: 0xdcc9a0, grass: 0x5a9660, rock: 0x9a9a90, rockDark: 0x7c7d73,
+  rockPale: 0xb0afa4, rockWarm: 0x8e8577,
   mangrove: 0x2f6b46, concrete: 0xb9bcc0, steel: 0x8e959c, dark: 0x3a4048,
   glassTower: 0x9fc4d8, gold: 0xd6b45a, white: 0xeceff1,
 };
@@ -687,13 +688,17 @@ export function buildWorld(quality = 'high') {
       // Sized against the hulls that hide behind them: an outcrop should stand
       // clearly above a destroyer's superstructure without becoming a sea stack
       // that dwarfs the whole fight.
-      const main = mesh(buildRock(o.r * 0.86, rr), mat(C.rock), 0, o.r * 0.18, 0);
+      // Four tones rather than one: real outcrops are not all the same grey,
+      // and a merged scene keeps each tone as its own single draw call anyway.
+      const tones = [C.rock, C.rockDark, C.rockPale, C.rockWarm];
+      const tone = tones[Math.floor(rr() * tones.length)];
+      const main = mesh(buildRock(o.r * 0.86, rr), mat(tone), 0, o.r * 0.18, 0);
       main.scale.y = 0.66 + rr() * 0.24;
       node.add(main);
       const peaks = detail ? (o.r > 13 ? 3 : 2) : 1;
       for (let i = 1; i < peaks; i++) {
         const a = rr() * Math.PI * 2, d = o.r * (0.3 + rr() * 0.3);
-        const sub = mesh(buildRock(o.r * (0.42 - i * 0.08), rr), mat(C.rockDark),
+        const sub = mesh(buildRock(o.r * (0.42 - i * 0.08), rr), mat(tones[Math.floor(rr() * tones.length)]),
           Math.cos(a) * d, o.r * (0.24 + rr() * 0.2), Math.sin(a) * d);
         sub.scale.y = 0.85 + rr() * 0.4;
         node.add(sub);
@@ -704,7 +709,7 @@ export function buildWorld(quality = 'high') {
 
     else if (o.type === 'mangrove') {
       node = new THREE.Group();
-      node.add(mesh(cyl(o.r * 0.72, o.r * 0.95, 1.4, 9), mat(0x6b6247), 0, 0.4, 0));
+      node.add(mesh(cyl(o.r * 0.72, o.r * 0.95, 1.4, 9), mat(0x8a8064), 0, 0.4, 0));
       const clumps = detail ? 7 : 3;
       for (let i = 0; i < clumps; i++) {
         const a = r2() * Math.PI * 2, d = r2() * o.r * 0.6;
@@ -718,7 +723,7 @@ export function buildWorld(quality = 'high') {
     else if (o.type === 'quay') {
       node = new THREE.Group();
       node.add(mesh(cyl(o.r, o.r * 1.02, o.h, 10), mat(C.concrete), 0, o.h / 2 - 0.4, 0));
-      node.add(mesh(cyl(o.r * 1.03, o.r * 1.03, 0.8, 10), mat(C.dark), 0, o.h - 0.5, 0));
+      node.add(mesh(cyl(o.r * 1.03, o.r * 1.03, 0.8, 10), mat(0x6a7078), 0, o.h - 0.5, 0));
       if (o.terminal) {
         const term = buildCruiseTerminal();
         term.position.set(0, o.h - 0.4, 0);

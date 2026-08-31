@@ -24,14 +24,15 @@
 import * as THREE from 'three';
 import { CFG } from '../config.js';
 import { buildShoreMask } from './world.js';
+import { makeRippleNormal } from './textures.js';
 
 /** dirX, dirZ (normalised), wavelength (m), amplitude (m), speed multiplier. */
 const WAVES = [
-  [1.00, 0.15, 190, 0.55, 0.90],
-  [0.30, 1.00, 145, 0.46, 0.75],
-  [1.00, 1.00, 95, 0.26, 1.35],
-  [1.00, -0.60, 58, 0.13, 1.90],
-  [-0.40, 1.00, 34, 0.065, 2.40],
+  [1.00, 0.15, 190, 0.30, 0.90],
+  [0.30, 1.00, 145, 0.25, 0.75],
+  [1.00, 1.00, 95, 0.14, 1.35],
+  [1.00, -0.60, 58, 0.075, 1.90],
+  [-0.40, 1.00, 34, 0.038, 2.40],
 ];
 
 const TAU = Math.PI * 2;
@@ -89,6 +90,7 @@ const FRAG = /* glsl */`
   uniform vec3 uFogColor;
   uniform float uFogNear;
   uniform float uFogFar;
+  uniform sampler2D uRipple;
 
   varying vec3 vWorld;
   varying float vHeight;
@@ -116,17 +118,16 @@ const FRAG = /* glsl */`
     vec2 p = vWorld.xz;
     ${waveGLSL('h', 'dhx', 'dhz', 'p')}
 
-    // Two ripple octaves that exist only here. Faded out with distance, or they
-    // alias into shimmering noise at the horizon.
-    float detail = 1.0 - smoothstep(120.0, 620.0, dist);
-    {
-      vec2 r1 = p * 0.42 + vec2(uTime * 0.9, -uTime * 0.6);
-      vec2 r2 = p * 0.91 + vec2(-uTime * 1.7, uTime * 1.2);
-      dhx += (cos(r1.x) * 0.020 + cos(r2.x) * 0.010) * detail;
-      dhz += (cos(r1.y) * 0.016 + cos(r2.y) * 0.008) * detail;
-    }
+    // Fine chop from a tiling normal map, sampled at two scales drifting in
+    // different directions. The wave geometry gives the sea its SHAPE; this
+    // gives it a SURFACE, and it is the difference between water and tinted
+    // glass. Faded out with distance or it aliases into shimmer at the horizon.
+    float detail = 1.0 - smoothstep(140.0, 700.0, dist);
+    vec2 rn1 = texture2D(uRipple, p * 0.026 + vec2(uTime * 0.011, uTime * 0.007)).xy * 2.0 - 1.0;
+    vec2 rn2 = texture2D(uRipple, p * 0.071 + vec2(-uTime * 0.019, uTime * 0.013)).xy * 2.0 - 1.0;
+    vec2 chop = (rn1 * 0.85 + rn2 * 0.55) * detail;
 
-    vec3 n = normalize(vec3(-dhx, 1.0, -dhz));
+    vec3 n = normalize(vec3(-dhx + chop.x * 0.42, 1.0, -dhz + chop.y * 0.42));
 
     // R = tight waterline band (foam), G = wide shallow shelf (colour).
     //
@@ -153,7 +154,7 @@ const FRAG = /* glsl */`
     vec3 refl = reflect(-view, n);
     refl.y = abs(refl.y);
     float fres = 0.02 + 0.98 * pow(1.0 - max(dot(n, view), 0.0), 5.0);
-    col = mix(col, skyAt(refl), clamp(fres, 0.0, 0.72));
+    col = mix(col, skyAt(refl), clamp(fres, 0.0, 0.86));
 
     // Sun: a tight highlight for the specular, and a broad one for the glitter
     // path that runs from the sun to the viewer.
@@ -169,7 +170,7 @@ const FRAG = /* glsl */`
     // amplitude is about 1.46m). Threshold it near the middle instead and
     // roughly half the wave cycle turns white, which reads as a foaming
     // storm rather than a calm strait.
-    float crest = smoothstep(1.02, 1.38, vHeight + noise(p * 0.09 + uTime * 0.12) * 0.18);
+    float crest = smoothstep(0.54, 0.73, vHeight + noise(p * 0.09 + uTime * 0.12) * 0.10);
     float ripple = sin(p.x * 0.30 + uTime * 2.1) * sin(p.y * 0.27 - uTime * 1.7);
     float shoreFoam = smoothstep(0.30, 0.62, shore.r + ripple * 0.09) *
                       (1.0 - smoothstep(0.80, 0.97, shore.r));
@@ -222,14 +223,15 @@ export class Water {
       uTime: { value: 0 },
       uShore: { value: buildShoreMask(quality === 'high' ? 512 : 256) },
       uHalf: { value: CFG.map.half },
-      uDeep: { value: new THREE.Color(0x0b3d5e) },
-      uShallow: { value: new THREE.Color(0x2fc0cf) },
+      uDeep: { value: new THREE.Color(0x123c58) },
+      uShallow: { value: new THREE.Color(0x2f9cb2) },
       uSunDir: { value: new THREE.Vector3(0.45, 0.62, 0.30).normalize() },
       uSkyTop: { value: new THREE.Color(0x2f7fb8) },
       uSkyHorizon: { value: new THREE.Color(0xc6e2ee) },
       uFogColor: { value: new THREE.Color(0xc6e2ee) },
       uFogNear: { value: 450 },
       uFogFar: { value: 1240 },
+      uRipple: { value: makeRippleNormal(256) },
     };
 
     this.material = new THREE.ShaderMaterial({
@@ -250,5 +252,6 @@ export class Water {
     this.mesh.geometry.dispose();
     this.material.dispose();
     this.uniforms.uShore.value.dispose();
+    this.uniforms.uRipple.value.dispose();
   }
 }

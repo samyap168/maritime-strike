@@ -16,6 +16,7 @@ import { createTicker } from './net/ticker.js';
 import { ClientSync } from './net/clientSync.js';
 import { buildWorld, ZONES, lineBlocked } from './game/world.js';
 import { Water, sampleWaveHeight, sampleWaveSlope } from './game/water.js';
+import { makeCloudTexture } from './game/textures.js';
 import { buildVessel } from './game/vessels.js';
 import { Effects } from './game/effects.js';
 import { PickupField, MineField } from './game/pickups.js';
@@ -1059,6 +1060,7 @@ function buildSky(horizonHex, sunDir) {
       uHorizon: { value: new THREE.Color(horizonHex) },
       uSunDir: { value: sunDir.clone().normalize() },
       uTime: { value: 0 },
+      uClouds: { value: makeCloudTexture(1024, 512) },
     },
     vertexShader: `
       varying vec3 vPos;
@@ -1071,39 +1073,38 @@ function buildSky(horizonHex, sunDir) {
       uniform vec3 uHorizon;
       uniform vec3 uSunDir;
       uniform float uTime;
+      uniform sampler2D uClouds;
       varying vec3 vPos;
-
-      float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-      float noise(vec2 p) {
-        vec2 i = floor(p), f = fract(p);
-        f = f * f * (3.0 - 2.0 * f);
-        return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x),
-                   mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
-      }
-      float fbm(vec2 p) {
-        return noise(p) * 0.55 + noise(p * 2.03) * 0.28 + noise(p * 4.11) * 0.17;
-      }
 
       void main() {
         vec3 dir = normalize(vPos);
         float h = clamp(dir.y, 0.0, 1.0);
-        vec3 col = mix(uHorizon, uTop, pow(h, 0.55));
 
+        // Base gradient, warmed toward the sun near the horizon. A flat blue
+        // ramp is most of what makes a procedural sky read as a placeholder.
         vec3 sun = normalize(uSunDir);
         float d = max(dot(dir, sun), 0.0);
-        // Broad atmospheric glow, then the disc itself.
-        col += vec3(1.0, 0.86, 0.62) * pow(d, 90.0) * 0.55;
-        col += vec3(1.0, 0.96, 0.88) * smoothstep(0.9985, 0.9995, d) * 2.2;
+        vec3 col = mix(uHorizon, uTop, pow(h, 0.55));
+        col = mix(col, vec3(1.0, 0.82, 0.62), pow(d, 3.0) * (1.0 - h) * 0.42);
 
-        // Cloud sheet, projected onto the dome and drifting. Faded out near the
-        // horizon so it never forms a hard line against the sea.
-        if (dir.y > 0.02) {
-          vec2 uv = dir.xz / max(dir.y, 0.02) * 0.55 + vec2(uTime * 0.004, uTime * 0.002);
-          float c = fbm(uv * 0.6);
-          c = smoothstep(0.52, 0.78, c) * smoothstep(0.02, 0.30, dir.y);
-          col = mix(col, vec3(1.0, 0.99, 0.97), c * 0.65);
-          // A touch of sun on the cloud tops.
-          col += vec3(1.0, 0.9, 0.75) * c * pow(d, 6.0) * 0.30;
+        col += vec3(1.0, 0.86, 0.62) * pow(d, 90.0) * 0.60;
+        col += vec3(1.0, 0.96, 0.88) * smoothstep(0.9985, 0.9995, d) * 2.4;
+
+        // Layered cloudscape from a generated equirectangular strip. Two taps at
+        // different scales and drift rates, so banks read as having depth rather
+        // than being one flat sheet.
+        if (dir.y > 0.0) {
+          float u = atan(dir.z, dir.x) / 6.2831853 + 0.5;
+          vec4 c1 = texture2D(uClouds, vec2(u + uTime * 0.0016, clamp(dir.y, 0.0, 1.0)));
+          vec4 c2 = texture2D(uClouds, vec2(u * 1.7 - uTime * 0.0027, clamp(dir.y * 1.35, 0.0, 1.0)));
+
+          // Far bank first, near bank layered over it.
+          col = mix(col, c2.rgb * 0.88, c2.a * 0.55);
+          col = mix(col, c1.rgb, c1.a * 0.92);
+
+          // Sunlit rims, and a warm underside where the sun sits behind a bank.
+          col += vec3(1.0, 0.88, 0.70) * c1.a * pow(d, 5.0) * 0.55;
+          col += vec3(1.0, 0.74, 0.52) * c1.a * (1.0 - h) * 0.16;
         }
 
         gl_FragColor = vec4(col, 1.0);
