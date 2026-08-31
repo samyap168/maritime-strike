@@ -12,19 +12,23 @@
  */
 
 import * as THREE from 'three';
-import { mat, mesh, box, cyl, cone, buildRock, buildPalm, buildHull, mulberry32 } from './geo.js';
+import {
+  mat, mesh, box, cyl, cone, buildRock, buildPalm, buildHull, mergeStatic, mulberry32,
+} from './geo.js';
 import { CFG } from '../config.js';
 
 const HALF = CFG.map.half;
 
 export const ZONES = [
-  { id: 'marina',    name: 'MARINA BAY',   x: 300,  z: -300 },
-  { id: 'keppel',    name: 'KEPPEL YARDS', x: -350, z: 40 },
-  { id: 'kranji',    name: 'KRANJI SHOALS', x: -60, z: -420 },
-  { id: 'sisters',   name: 'SISTERS ROCKS', x: 40,  z: 30 },
-  { id: 'palawan',   name: 'PALAWAN CAY',  x: 170,  z: 330 },
-  { id: 'anchorage', name: 'THE ANCHORAGE', x: 400, z: 170 },
-  { id: 'merlion',   name: 'MERLION CAY',  x: -190, z: -160 },
+  { id: 'marina',    name: 'MARINA BAY',        x: 300,  z: -300 },
+  { id: 'gardens',   name: 'GARDENS BY THE BAY', x: 205, z: -390 },
+  { id: 'psa',       name: 'PSA TERMINAL',      x: -370, z: 40 },
+  { id: 'kranji',    name: 'KRANJI SHOALS',     x: -60,  z: -420 },
+  { id: 'sisters',   name: 'SISTERS ROCKS',     x: 40,   z: 30 },
+  { id: 'sentosa',   name: 'SENTOSA',           x: 175,  z: 340 },
+  { id: 'cruise',    name: 'CRUISE CENTRE',     x: -30,  z: 260 },
+  { id: 'anchorage', name: 'THE ANCHORAGE',     x: 400,  z: 170 },
+  { id: 'merlion',   name: 'MERLION PARK',      x: -195, z: -165 },
 ];
 
 /**
@@ -65,13 +69,14 @@ function pushShip(x, z, angle, length, beam, extra = {}) {
 }
 
 // --- MARINA BAY: long sight-lines, the destroyer's ground ---------------------
-const marinaIsle = push(300, -300, 88, 'island', { h: 7 });
-push(205, -388, 26, 'island', { h: 5, wheel: true });
+const marinaIsle = push(300, -300, 88, 'island', { h: 7, marina: true });
+// Gardens by the Bay on its own reclaimed spit, with the Flyer beside it.
+push(205, -388, 30, 'island', { h: 5, wheel: true, supertrees: true });
 
 // --- KEPPEL YARDS: the best hard cover on the map, a maze at water level ------
-push(-400, 40, 76, 'quay', { h: 6 });
-push(-318, -50, 54, 'quay', { h: 6 });
-push(-318, 130, 54, 'quay', { h: 6 });
+push(-400, 40, 76, 'quay', { h: 6, cranes: 3 });
+push(-318, -50, 54, 'quay', { h: 6, cranes: 2 });
+push(-318, 130, 54, 'quay', { h: 6, cranes: 2 });
 // Two container ships berthed alongside — long, solid, and the best cover on
 // the map to fight around.
 pushShip(-232, -40, 0.12, 190, 30, { h: 9, containers: true });
@@ -92,8 +97,12 @@ for (let i = 0; i < 11; i++) {
 }
 
 // --- PALAWAN CAY: southern resort island -------------------------------------
-push(175, 340, 94, 'island', { h: 8, palms: true });
+push(175, 340, 94, 'island', { h: 8, palms: true, sentosa: true });
 push(175, 238, 11, 'jetty', { h: 2 });
+// HarbourFront: cruise terminal and a liner alongside. The hull is also the
+// longest single piece of cover on the southern half of the map.
+push(-30, 268, 40, 'quay', { h: 7, terminal: true });
+pushShip(-30, 190, 0.06, 260, 34, { h: 13, cruise: true });
 
 // --- THE ANCHORAGE: cover in open water, so mid-map is not a kill zone --------
 // Moored shipping: the reason the middle of the map is worth fighting over.
@@ -267,24 +276,166 @@ function jitterRing(geo, r2, amount) {
   geo.computeVertexNormals();
 }
 
+/**
+ * Gardens by the Bay Supertrees.
+ *
+ * The single most recognisable silhouette on the Singapore waterfront after the
+ * Sands, and cheap to build: a tapered trunk, a flared canopy of ribs, and the
+ * skyway slung between the two tallest. Worth getting right because from a boat
+ * at sea level these read long before any building does.
+ */
+function buildSupertrees(r2) {
+  const g = new THREE.Group();
+  const trunkMat = mat(0x6d5a4a);
+  const ribMat = mat(0x8e2f3f);
+  const leafMat = mat(0x3f7d44);
+  const placed = [];
+
+  const layout = [
+    [0, 0, 46], [26, 14, 38], [-24, 12, 40], [10, -28, 34],
+    [-30, -18, 30], [34, -12, 32], [-6, 30, 36],
+  ];
+
+  for (const [x, z, h] of layout) {
+    const t = new THREE.Group();
+    t.position.set(x, 0, z);
+    t.add(mesh(cyl(1.6, 3.4, h, 8), trunkMat, 0, h / 2, 0));
+    // Flared canopy of radiating ribs.
+    const canopyR = h * 0.36;
+    t.add(mesh(cyl(canopyR, 2.2, h * 0.16, 10), ribMat, 0, h + h * 0.06, 0));
+    for (let i = 0; i < 9; i++) {
+      const a = (i / 9) * Math.PI * 2;
+      const rib = mesh(box(0.5, 0.5, canopyR * 1.05), ribMat,
+        Math.cos(a) * canopyR * 0.5, h + h * 0.14, Math.sin(a) * canopyR * 0.5);
+      rib.rotation.y = a;
+      rib.rotation.x = -0.22;
+      t.add(rib);
+    }
+    // Planted flanks up the trunk.
+    for (let i = 0; i < 5; i++) {
+      const a = r2() * Math.PI * 2;
+      t.add(mesh(box(1.4, h * 0.16, 1.4), leafMat,
+        Math.cos(a) * 2.6, h * (0.25 + i * 0.14), Math.sin(a) * 2.6));
+    }
+    placed.push({ x, z, h });
+    g.add(t);
+  }
+
+  // The OCBC Skyway between the two tallest trees.
+  placed.sort((a, b) => b.h - a.h);
+  const [a1, a2] = placed;
+  const dx = a2.x - a1.x, dz = a2.z - a1.z;
+  const span = Math.hypot(dx, dz);
+  const walk = mesh(box(2.4, 0.5, span), mat(0xb9bcc0),
+    (a1.x + a2.x) / 2, (a1.h + a2.h) / 2 * 0.92, (a1.z + a2.z) / 2);
+  walk.rotation.y = Math.atan2(dx, dz);
+  g.add(walk);
+  return g;
+}
+
+/** ArtScience Museum: the lotus. Ten upward-tilted petals around a low base. */
+function buildLotus() {
+  const g = new THREE.Group();
+  g.add(mesh(cyl(9, 11, 3, 12), mat(0xe8eaed), 0, 1.5, 0));
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2;
+    const h = 13 + (i % 3) * 4;
+    const petal = mesh(cone(2.4, h, 5), mat(0xf2f4f6), Math.cos(a) * 6.5, 3 + h / 2, Math.sin(a) * 6.5);
+    petal.rotation.z = -Math.cos(a) * 0.30;
+    petal.rotation.x = Math.sin(a) * 0.30;
+    g.add(petal);
+  }
+  return g;
+}
+
+/** Esplanade: the twin spiked domes. */
+function buildEsplanade() {
+  const g = new THREE.Group();
+  for (const dx of [-13, 13]) {
+    const dome = new THREE.Mesh(
+      new THREE.SphereGeometry(10, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2),
+      mat(0xb08d5a, { flatShading: true })
+    );
+    dome.position.set(dx, 1, 0);
+    g.add(dome);
+    // The spikes are the whole point of the silhouette.
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2;
+      const r = 6 + (i % 2) * 2.6;
+      g.add(mesh(cone(0.9, 4.5, 4), mat(0x8a6a3e),
+        dx + Math.cos(a) * r, 8 + (i % 3), Math.sin(a) * r));
+    }
+  }
+  return g;
+}
+
+/** Sentosa cable car: two pylons and a run of cabins. */
+function buildCableCar() {
+  const g = new THREE.Group();
+  const towers = [[-58, -40, 52], [46, 34, 44]];
+  for (const [x, z, h] of towers) {
+    g.add(mesh(cyl(1.6, 2.8, h, 6), mat(0xb0453a), x, h / 2, z));
+    g.add(mesh(box(9, 1.4, 1.4), mat(0xb0453a), x, h, z));
+  }
+  const [t1, t2] = towers;
+  const dx = t2[0] - t1[0], dz = t2[1] - t1[1];
+  const span = Math.hypot(dx, dz);
+  const ang = Math.atan2(dx, dz);
+  const cable = mesh(box(0.22, 0.22, span), mat(0x2b313a),
+    (t1[0] + t2[0]) / 2, (t1[2] + t2[2]) / 2 - 3, (t1[1] + t2[1]) / 2);
+  cable.rotation.y = ang;
+  g.add(cable);
+  for (let i = 1; i < 5; i++) {
+    const k = i / 5;
+    const cab = mesh(box(2.4, 3.0, 2.8), mat(0xf0a030),
+      t1[0] + dx * k, t1[2] + (t2[2] - t1[2]) * k - 5.4, t1[1] + dz * k);
+    cab.rotation.y = ang;
+    g.add(cab);
+  }
+  return g;
+}
+
+/** Cruise terminal: a long wave-roofed shed on the quay. */
+function buildCruiseTerminal() {
+  const g = new THREE.Group();
+  g.add(mesh(box(60, 9, 26), mat(0xe4e7ea), 0, 4.5, 0));
+  for (let i = 0; i < 5; i++) {
+    const arc = mesh(cyl(9, 9, 24, 10, 1, false, 0, Math.PI), mat(0xc8ccd0), -24 + i * 12, 9, 0);
+    arc.rotation.z = Math.PI / 2;
+    arc.rotation.y = Math.PI / 2;
+    g.add(arc);
+  }
+  g.add(mesh(box(64, 1.2, 30), mat(0x9aa0a6), 0, 9.6, 0));
+  // Gangways reaching out to the berth.
+  for (const dz of [-9, 9]) g.add(mesh(box(3, 2, 34), mat(0xb9bcc0), -8, 7, dz - 26));
+  return g;
+}
+
 /** Marina Bay: three towers under a sky-deck, plus an observation wheel. */
 function buildMarinaSkyline(r2) {
   const g = new THREE.Group();
-  const towerH = [52, 58, 54];
+  // Marina Bay Sands. Slim, tall and slightly splayed at the base, with the
+  // SkyPark laid across all three — the one silhouette everybody recognises.
+  const towerH = [74, 80, 76];
+  const towerMat = mat(C.glassTower, { emissive: 0x1c3d52, emissiveIntensity: 0.35 });
   for (let i = 0; i < 3; i++) {
-    const t = mesh(box(13, towerH[i], 15), mat(C.glassTower, { emissive: 0x1c3d52, emissiveIntensity: 0.35 }), (i - 1) * 26, towerH[i] / 2, 0);
-    t.rotation.y = (i - 1) * 0.05;
+    const h = towerH[i];
+    const t = mesh(box(11, h, 17), towerMat, (i - 1) * 27, h / 2, 0);
+    t.rotation.z = (i - 1) * 0.045;   // the towers lean apart toward the base
     g.add(t);
-    // Banded floors give the towers scale and stop them reading as plain slabs.
-    for (let band = 1; band < 5; band++) {
-      g.add(mesh(box(13.3, 0.9, 15.3), mat(C.white), (i - 1) * 26, (towerH[i] / 5) * band, 0));
+    for (let band = 1; band < 7; band++) {
+      g.add(mesh(box(11.3, 0.7, 17.3), mat(C.white), (i - 1) * 27 + (i - 1) * band * 0.15, (h / 7) * band, 0));
     }
   }
-  // The sky-deck across the top is the single most recognisable line in the city.
-  const deck = mesh(box(78, 3.4, 19), mat(C.white), 0, 58, 0);
+  // SkyPark: a boat-shaped deck with the cantilever overhanging one end.
+  const deck = mesh(box(86, 3.6, 21), mat(C.white), 0, 80, 0);
   g.add(deck);
-  g.add(mesh(box(74, 0.8, 13), mat(0x4fb3d9), 0, 60.2, 0));
-  g.add(mesh(cyl(1.2, 1.2, 9, 6), mat(C.white), 30, 63, 0));
+  g.add(mesh(box(24, 3.0, 18), mat(C.white), 55, 79.6, 0));            // cantilever
+  g.add(mesh(box(70, 0.9, 12), mat(0x4fb3d9, { emissive: 0x14556b, emissiveIntensity: 0.5 }), -4, 82.3, 0));
+  for (let i = 0; i < 12; i++) {
+    g.add(mesh(cyl(0.7, 0.7, 5, 5), mat(0x2f6b46), -34 + i * 6.5, 84.2, 7));   // rooftop palms
+  }
+  g.add(mesh(cyl(1.0, 1.0, 11, 6), mat(C.white), 40, 87, 0));
 
   // Waterfront shophouse blocks so the shoreline is not bare.
   for (let i = 0; i < 7; i++) {
@@ -329,12 +480,14 @@ function buildMerlion() {
 
 function buildCrane() {
   const g = new THREE.Group();
-  const H = 34;
+  // PSA's quay cranes are the tallest thing on the western skyline; short ones
+  // read as scaffolding rather than a container terminal.
+  const H = 46;
   for (const dx of [-9, 9]) for (const dz of [-7, 7]) {
     g.add(mesh(box(1.5, H, 1.5), mat(0xd8892b), dx, H / 2, dz));
   }
   g.add(mesh(box(22, 2.6, 18), mat(0xd8892b), 0, H, 0));
-  g.add(mesh(box(3.2, 3.0, 62), mat(0xd8892b), 0, H + 3.6, 8));       // boom
+  g.add(mesh(box(3.2, 3.0, 84), mat(0xd8892b), 0, H + 3.6, 12));      // boom out over the berth
   g.add(mesh(box(4.4, 5.0, 6.0), mat(C.dark), 0, H - 3.5, 12));       // operator cab
   g.add(mesh(box(1.2, 8.0, 1.2), mat(C.steel), 0, H + 8, -2));
   return g;
@@ -373,7 +526,28 @@ function buildMooredShip(o, r2) {
   g.add(mesh(box(B * 0.26, o.h * 0.9, B * 0.22), mat(0x22262b), 0, deckY + houseH + o.h * 0.45, -L * 0.44));
   g.add(mesh(cyl(0.12, 0.12, o.h * 1.1, 5), mat(0xb9bcc0), 0, deckY + houseH + o.h * 0.55, -L * 0.38));
 
-  if (o.tanker) {
+  if (o.cruise) {
+    // A cruise liner: stacked white passenger decks, a funnel, and lifeboats
+    // slung along the promenade. Tall enough to hide a destroyer behind.
+    for (let d = 0; d < 5; d++) {
+      const inset = d * 0.035;
+      g.add(mesh(box(B * (0.95 - inset * 2), 3.6, L * (0.78 - d * 0.045)),
+        mat(0xf3f5f7), 0, deckY + 1.8 + d * 3.7, -L * 0.02));
+      // Balcony banding, which is what makes it read as a liner not a box.
+      g.add(mesh(box(B * (0.97 - inset * 2), 0.5, L * (0.79 - d * 0.045)),
+        mat(0x9fb6c4), 0, deckY + 3.4 + d * 3.7, -L * 0.02));
+    }
+    g.add(mesh(box(B * 0.5, 5.5, L * 0.10), mat(0xf3f5f7), 0, deckY + 22.5, L * 0.16));
+    g.add(mesh(cyl(B * 0.16, B * 0.20, 8, 10), mat(0x1f4e79), 0, deckY + 24.5, -L * 0.14));
+    g.add(mesh(box(B * 0.42, 1.2, 4), mat(0x1f4e79), 0, deckY + 28, -L * 0.14));
+    for (const side of [1, -1]) {
+      for (let i = 0; i < 7; i++) {
+        g.add(mesh(box(1.2, 1.4, 4.2), mat(0xe8863a),
+          side * B * 0.47, deckY + 2.2, -L * 0.24 + i * L * 0.08));
+      }
+    }
+    g.add(mesh(box(B * 0.9, 0.6, L * 0.80), mat(0x2b6a8f), 0, deckY + 0.4, -L * 0.02));
+  } else if (o.tanker) {
     // Pipework and manifold along an otherwise flat deck.
     g.add(mesh(box(B * 0.10, 0.7, L * 0.62), mat(0xc9ccce), 0, deckY + 0.7, L * 0.04));
     for (let i = 0; i < 7; i++) {
@@ -480,8 +654,28 @@ export function buildWorld(quality = 'high') {
           node.add(mesh(box(11, h, 9), mat(0xe7dccb), Math.cos(a) * o.r * 0.55, o.h + h / 2 + 0.4, Math.sin(a) * o.r * 0.55));
         }
       }
-      if (o === marinaIsle) { const sk = buildMarinaSkyline(r2); sk.position.y = o.h + 0.6; node.add(sk); }
-      if (o.wheel) { const w = buildWheel(); w.position.y = o.h + 0.6; node.add(w); root.userData.wheel = w; }
+      if (o.marina) {
+        const sk = buildMarinaSkyline(r2);
+        sk.position.set(-8, o.h + 0.6, -14);
+        node.add(sk);
+        const lotus = buildLotus();
+        lotus.position.set(40, o.h + 0.6, 26);
+        node.add(lotus);
+        const esp = buildEsplanade();
+        esp.position.set(-46, o.h + 0.6, 30);
+        node.add(esp);
+      }
+      if (o.supertrees && detail) {
+        const st = buildSupertrees(r2);
+        st.position.set(2, o.h + 0.6, 6);
+        node.add(st);
+      }
+      if (o.wheel) { const w = buildWheel(); w.position.set(-4, o.h + 0.6, -22); node.add(w); root.userData.wheel = w; }
+      if (o.sentosa && detail) {
+        const cc = buildCableCar();
+        cc.position.y = o.h + 0.6;
+        node.add(cc);
+      }
     }
 
     else if (o.type === 'rock') {
@@ -525,15 +719,23 @@ export function buildWorld(quality = 'high') {
       node = new THREE.Group();
       node.add(mesh(cyl(o.r, o.r * 1.02, o.h, 10), mat(C.concrete), 0, o.h / 2 - 0.4, 0));
       node.add(mesh(cyl(o.r * 1.03, o.r * 1.03, 0.8, 10), mat(C.dark), 0, o.h - 0.5, 0));
-      if (detail) {
+      if (o.terminal) {
+        const term = buildCruiseTerminal();
+        term.position.set(0, o.h - 0.4, 0);
+        node.add(term);
+      } else if (detail) {
         node.add(buildContainerField(r2, [
-          { x: -o.r * 0.3, z: 0, y: o.h - 0.4, count: 10 },
-          { x: o.r * 0.35, z: o.r * 0.25, y: o.h - 0.4, count: 8 },
+          { x: -o.r * 0.3, z: 0, y: o.h - 0.4, count: 12 },
+          { x: o.r * 0.35, z: o.r * 0.25, y: o.h - 0.4, count: 10 },
         ]));
-        const crane = buildCrane();
-        crane.position.set(0, o.h - 0.4, -o.r * 0.35);
-        crane.rotation.y = Math.PI / 2;
-        node.add(crane);
+        // PSA's row of quay cranes is the port's real silhouette.
+        const n = o.cranes || 1;
+        for (let i = 0; i < n; i++) {
+          const crane = buildCrane();
+          crane.position.set(0, o.h - 0.4, -o.r * 0.55 + (i / Math.max(1, n - 1)) * o.r * 1.1);
+          crane.rotation.y = Math.PI / 2;
+          node.add(crane);
+        }
       }
     }
 
@@ -575,6 +777,12 @@ export function buildWorld(quality = 'high') {
   buoyRed.instanceMatrix.needsUpdate = true;
   buoyGrn.instanceMatrix.needsUpdate = true;
   root.add(buoyRed, buoyGrn);
+
+  // Collapse the whole static world into one mesh per material. The landmarks
+  // add hundreds of small meshes, and draw calls — not triangles — are what
+  // limit integrated laptop GPUs. The observation wheel is excluded because it
+  // turns. Instanced meshes (containers, buoys) are skipped automatically.
+  mergeStatic(root, root.userData.wheel ? [root.userData.wheel] : []);
 
   return root;
 }

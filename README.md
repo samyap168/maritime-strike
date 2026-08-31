@@ -115,11 +115,20 @@ a rising warning tone. Your own team always sees them.
 
 ## The map
 
-1200 m × 1200 m, mostly open water, with seven named zones so people can call
-them out: **Marina Bay** (long sight-lines, destroyer country), **Keppel Yards**
-(container maze, the best hard cover), **Kranji Shoals** (mangrove channels,
-ambush country), **Sisters Rocks**, **Palawan Cay**, **The Anchorage** (moored
-tankers, so mid-map is not a featureless kill zone) and **Merlion Cay**.
+1200 m × 1200 m, mostly open water, with nine named zones so people can call
+them out:
+
+| Zone | What's there |
+|---|---|
+| **Marina Bay** | Marina Bay Sands with its SkyPark, the ArtScience lotus, the Esplanade domes. Long sight-lines — destroyer country |
+| **Gardens by the Bay** | The Supertrees and their skyway, with the Singapore Flyer alongside |
+| **PSA Terminal** | Quay cranes over the berths, container stacks, container ships alongside. The best hard cover on the map |
+| **Cruise Centre** | The terminal and a berthed liner — the longest single piece of cover in the south |
+| **Sentosa** | Resort island with the cable car running across it |
+| **Kranji Shoals** | Mangrove channels. Ambush and minelayer country |
+| **Sisters Rocks** | Rocky outcrops through the middle, breaking sight-lines |
+| **The Anchorage** | Moored tankers and container ships, so mid-map is not a featureless kill zone |
+| **Merlion Park** | The Merlion on its own cay |
 
 Twelve weapon pickups respawn 25 s after being taken, each throwing a coloured
 light column visible across the map. That is how fights start.

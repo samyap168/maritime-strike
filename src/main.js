@@ -82,7 +82,11 @@ class Game {
     // the ocean fades into the sky with no visible seam at the horizon.
     this.horizonColor = 0xc6e2ee;
     this.scene.fog = new THREE.Fog(this.horizonColor, 450, 1240);
-    this.scene.add(buildSky(this.horizonColor));
+    // One sun direction shared by the light, the sky and the water's specular,
+    // so the highlight on the sea lines up with the sun you can actually see.
+    this.sunDir = new THREE.Vector3(0.45, 0.62, 0.30).normalize();
+    this.sky = buildSky(this.horizonColor, this.sunDir);
+    this.scene.add(this.sky);
 
     this.camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.6, 3000);
     this.camera.position.set(0, 120, 260);
@@ -91,7 +95,7 @@ class Game {
     // makes flat-shaded geometry read well.
     this.scene.add(new THREE.HemisphereLight(0xbfe4f5, 0x2a5a70, 1.05));
     const sun = new THREE.DirectionalLight(0xfff0d6, 1.45);
-    sun.position.set(180, 260, 120);
+    sun.position.copy(this.sunDir).multiplyScalar(420);
     sun.castShadow = true;
     sun.shadow.mapSize.set(1024, 1024);
     // A tight shadow cascade around the action — full-map shadows would be
@@ -104,6 +108,7 @@ class Game {
     this.scene.add(sun, sun.target);
 
     this.water = new Water(this.quality);
+    this.water.uniforms.uSunDir.value.copy(this.sunDir);
     this.water.uniforms.uFogColor.value.setHex(this.horizonColor);
     this.water.uniforms.uFogNear.value = 450;
     this.water.uniforms.uFogFar.value = 1240;
@@ -760,6 +765,7 @@ class Game {
 
     this.checkPerformance(dt);
     this.water.update(this.time);
+    if (this.sky) this.sky.userData.material.uniforms.uTime.value = this.time;
     // Keep the ocean centred on the camera. Waves are computed from world
     // coordinates, so sliding the plane does not slide the swell — it just
     // guarantees the plane's edge is always past the fog, anywhere on the map,
@@ -913,7 +919,11 @@ class Game {
 
     if (camTarget) {
       this.rig.update(camTarget, this.controls.aimPoint, dt, this.effects.shake);
-      this.sun.position.set(camTarget.x + 180, 260, camTarget.z + 120);
+      this.sun.position.set(
+        camTarget.x + this.sunDir.x * 420,
+        this.sunDir.y * 420,
+        camTarget.z + this.sunDir.z * 420
+      );
       this.sun.target.position.set(camTarget.x, 0, camTarget.z);
       this.sun.target.updateMatrixWorld();
     }
@@ -1031,11 +1041,15 @@ class Game {
 }
 
 /**
- * Gradient sky dome. Real geometry rather than a flat background texture, so
- * the horizon band stays locked to the true horizon as the camera moves — which
- * is what lets the fog blend into it invisibly.
+ * Gradient sky dome with a sun and drifting cloud.
+ *
+ * Real geometry rather than a background texture, so the horizon band stays
+ * locked to the true horizon as the camera moves — which is what lets the fog
+ * and the ocean's reflection blend into it invisibly. The gradient function is
+ * duplicated in the water shader deliberately; both must agree or the sea
+ * reflects a sky that is not there.
  */
-function buildSky(horizonHex) {
+function buildSky(horizonHex, sunDir) {
   const m = new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
@@ -1043,6 +1057,8 @@ function buildSky(horizonHex) {
     uniforms: {
       uTop: { value: new THREE.Color(0x2f7fb8) },
       uHorizon: { value: new THREE.Color(horizonHex) },
+      uSunDir: { value: sunDir.clone().normalize() },
+      uTime: { value: 0 },
     },
     vertexShader: `
       varying vec3 vPos;
@@ -1053,17 +1069,52 @@ function buildSky(horizonHex) {
     fragmentShader: `
       uniform vec3 uTop;
       uniform vec3 uHorizon;
+      uniform vec3 uSunDir;
+      uniform float uTime;
       varying vec3 vPos;
+
+      float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float noise(vec2 p) {
+        vec2 i = floor(p), f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x),
+                   mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
+      }
+      float fbm(vec2 p) {
+        return noise(p) * 0.55 + noise(p * 2.03) * 0.28 + noise(p * 4.11) * 0.17;
+      }
+
       void main() {
-        float h = clamp(normalize(vPos).y, 0.0, 1.0);
-        gl_FragColor = vec4(mix(uHorizon, uTop, pow(h, 0.55)), 1.0);
+        vec3 dir = normalize(vPos);
+        float h = clamp(dir.y, 0.0, 1.0);
+        vec3 col = mix(uHorizon, uTop, pow(h, 0.55));
+
+        vec3 sun = normalize(uSunDir);
+        float d = max(dot(dir, sun), 0.0);
+        // Broad atmospheric glow, then the disc itself.
+        col += vec3(1.0, 0.86, 0.62) * pow(d, 90.0) * 0.55;
+        col += vec3(1.0, 0.96, 0.88) * smoothstep(0.9985, 0.9995, d) * 2.2;
+
+        // Cloud sheet, projected onto the dome and drifting. Faded out near the
+        // horizon so it never forms a hard line against the sea.
+        if (dir.y > 0.02) {
+          vec2 uv = dir.xz / max(dir.y, 0.02) * 0.55 + vec2(uTime * 0.004, uTime * 0.002);
+          float c = fbm(uv * 0.6);
+          c = smoothstep(0.52, 0.78, c) * smoothstep(0.02, 0.30, dir.y);
+          col = mix(col, vec3(1.0, 0.99, 0.97), c * 0.65);
+          // A touch of sun on the cloud tops.
+          col += vec3(1.0, 0.9, 0.75) * c * pow(d, 6.0) * 0.30;
+        }
+
+        gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }`,
   });
-  const sky = new THREE.Mesh(new THREE.SphereGeometry(1800, 20, 12), m);
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(1800, 24, 14), m);
   sky.frustumCulled = false;
   sky.renderOrder = -2;
+  sky.userData.material = m;
   return sky;
 }
 
