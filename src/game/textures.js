@@ -159,6 +159,39 @@ export function makeCloudTexture(w = 1024, h = 512) {
 }
 
 /**
+ * Terrain grit.
+ *
+ * Islands and rock are big flat-shaded facets; at gameplay distance each facet
+ * reads as a single solid colour, which is exactly what makes low-poly terrain
+ * look unfinished. A mottled multiply map breaks each facet up without changing
+ * the silhouette or costing a single triangle. Averages near white so it darkens
+ * nothing.
+ */
+export function makeTerrainTexture(size = 256) {
+  const coarse = fbm(size, 4, 6, 0x7E44);
+  const fine = fbm(size, 3, 22, 0x2B91);
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(size, size);
+
+  for (let i = 0; i < size * size; i++) {
+    // Centre the mottling on 1.0 so it modulates rather than shades.
+    const v = 1 + (coarse[i] - 0.5) * 0.34 + (fine[i] - 0.5) * 0.20;
+    const g = Math.max(0, Math.min(255, Math.round(v * 232)));
+    const j = i * 4;
+    img.data[j] = g;
+    img.data[j + 1] = Math.max(0, Math.min(255, g - 2));
+    img.data[j + 2] = Math.max(0, Math.min(255, g - 6));
+    img.data[j + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
+/**
  * Grimy panel plating for hulls and port structures: panel seams, plate-to-plate
  * tonal variation, weld lines and streaking. Greyscale, used as a light map
  * multiplier so one tile serves every hull colour.
@@ -169,21 +202,24 @@ export function makePanelTexture(size = 256) {
   const ctx = c.getContext('2d');
   const rnd = mulberry(0xBEEF);
 
-  ctx.fillStyle = '#b8b8b8';
+  // A lit material MULTIPLIES its colour by this map, so the tile must average
+  // near white. Build it dark and every hull in the game silently loses a third
+  // of its brightness.
+  ctx.fillStyle = '#f0f0f0';
   ctx.fillRect(0, 0, size, size);
 
   // Plates, each very slightly off its neighbours.
   const cols = 8, rows = 6;
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) {
-      const v = 176 + Math.floor(rnd() * 26) - 13;
+      const v = 240 + Math.floor(rnd() * 18) - 9;
       ctx.fillStyle = `rgb(${v},${v},${v})`;
       ctx.fillRect(x * size / cols, y * size / rows, size / cols, size / rows);
     }
   }
 
   // Seams between plates.
-  ctx.strokeStyle = 'rgba(90,92,96,0.55)';
+  ctx.strokeStyle = 'rgba(90,92,96,0.42)';
   ctx.lineWidth = 1;
   for (let x = 0; x <= cols; x++) {
     ctx.beginPath(); ctx.moveTo(x * size / cols, 0); ctx.lineTo(x * size / cols, size); ctx.stroke();
@@ -193,9 +229,9 @@ export function makePanelTexture(size = 256) {
   }
 
   // Vertical streaking below the seams — the thing that reads as "used".
-  for (let i = 0; i < 90; i++) {
+  for (let i = 0; i < 110; i++) {
     const x = rnd() * size, y = rnd() * size, len = 6 + rnd() * 34;
-    ctx.strokeStyle = `rgba(96,90,82,${0.05 + rnd() * 0.12})`;
+    ctx.strokeStyle = `rgba(96,90,82,${0.04 + rnd() * 0.10})`;
     ctx.lineWidth = 1 + rnd() * 2.4;
     ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + (rnd() - 0.5) * 2, y + len); ctx.stroke();
   }
@@ -203,4 +239,32 @@ export function makePanelTexture(size = 256) {
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   return tex;
+}
+
+
+/** Shared singletons — one GPU upload each, reused by every material. */
+let _panel = null, _terrain = null;
+export function panelTexture() { return (_panel = _panel || makePanelTexture(256)); }
+export function terrainTexture() { return (_terrain = _terrain || makeTerrainTexture(256)); }
+
+/**
+ * A tiling variant of a shared texture, cached by its repeat setting.
+ *
+ * Cloning per material looks harmless but quietly costs draw calls: the geometry
+ * merge keys on map identity, so a hundred rocks each holding their own clone
+ * can never merge with one another. Caching by repeat means every rock at the
+ * same tiling shares one texture and collapses into a single call.
+ */
+const tileCache = new Map();
+export function tiled(base, ru, rv = ru) {
+  const key = `${base.uuid}|${ru}|${rv}`;
+  let t = tileCache.get(key);
+  if (!t) {
+    t = base.clone();
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(ru, rv);
+    t.needsUpdate = true;
+    tileCache.set(key, t);
+  }
+  return t;
 }

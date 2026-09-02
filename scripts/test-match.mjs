@@ -24,6 +24,29 @@ const host = await newPage('host'), c1 = await newPage('c1');
  * open water: the shots missed and the failure looked like a game bug rather
  * than a fragile test.
  */
+/**
+ * Poll a page until a predicate holds.
+ *
+ * Fixed sleeps are the wrong tool here: startup cost drifts as the renderer
+ * gains work, and a sleep that was generous last month silently becomes a race.
+ * Every failure it produces looks like a game bug, which wastes far more time
+ * than polling costs.
+ */
+async function waitUntil(page, exprSrc, timeoutMs = 30000, label = 'condition') {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    // eslint-disable-next-line no-await-in-loop
+    const ok = await page.evaluate((src) => {
+      try { return !!new Function('g', src)(window.__game); } catch { return false; }
+    }, exprSrc);
+    if (ok) return true;
+    // eslint-disable-next-line no-await-in-loop
+    await page.waitForTimeout(250);
+  }
+  console.log(`  (timed out waiting for ${label})`);
+  return false;
+}
+
 async function settledAim(page, bodySrc) {
   let last = null;
   for (let i = 0; i < 60; i++) {
@@ -73,9 +96,9 @@ await host.waitForTimeout(1000);
 ok('host can start once everyone is ready', await host.evaluate(() => window.__game.sim.startBlocker() === null));
 
 await host.click('#btn-start');
-await host.waitForTimeout(7000);
-ok('both reached the match', await host.evaluate(() => window.__game.phase) === 'match'
-   && await c1.evaluate(() => window.__game.phase) === 'match');
+const hostInMatch = await waitUntil(host, "return g.phase === 'match'", 30000, 'host match');
+const clientInMatch = await waitUntil(c1, "return g.phase === 'match'", 30000, 'client match');
+ok('both reached the match', hostInMatch && clientInMatch);
 
 // Pickup: drop the host onto a crate and confirm the vessel transforms.
 await host.bringToFront();
@@ -84,11 +107,11 @@ await host.evaluate(() => {
   const pu = g.sim.pickups.find(p => p.active && p.kind === 'missile');
   me.x = pu.x; me.z = pu.z;
 });
-await host.waitForTimeout(1200);
+await waitUntil(host, "return g.sim.players[g.localId].v === 'destroyer'", 15000, 'host pickup');
 ok('pickup transforms the vessel', await host.evaluate(() => window.__game.sim.players[window.__game.localId].v));
-await c1.waitForTimeout(800);
+// The client learns about it over the network, so poll rather than assume.
 ok('client sees the new vessel too',
-   await c1.evaluate(() => Object.values(window.__game.lastView.players).some(p => p.v === 'destroyer')));
+   await waitUntil(c1, "return Object.values(g.lastView.players).some(p => p.v === 'destroyer')", 15000, 'client vessel'));
 
 // Friendly fire must do nothing.
 const ffHp = await host.evaluate(async () => {

@@ -18,6 +18,18 @@ import {
 } from './geo.js';
 import { VESSELS } from '../config.js';
 import { getAsset } from './assets.js';
+import { panelTexture, tiled } from './textures.js';
+
+/**
+ * Hull material: base colour multiplied by the shared plating map.
+ *
+ * The map averages near white, so a hull keeps its colour and gains seams,
+ * plate-to-plate variation and streaking. One texture instance is shared by
+ * every vessel, so this is a single GPU upload no matter how many hulls exist.
+ */
+function hullMat(color, repeatU = 1, repeatV = 1) {
+  return mat(color, { map: tiled(panelTexture(), repeatU, repeatV) });
+}
 
 const PALETTE = {
   wood: 0x9c7047, woodDark: 0x6d4c29, canvas: 0xd9cbb0,
@@ -67,7 +79,7 @@ function buildSampan(teamColor) {
   const hull = mesh(buildHull({
     length: L, beam: B, draft: 0.55, freeboard: 0.62,
     sternFullness: 0.6, sheer: 0.5, bowRise: 0.95,
-  }), mat(PALETTE.wood));
+  }), hullMat(PALETTE.wood, 1, 2));
   g.add(hull);
 
   // Painted sheer strake — the detail that makes it read as a wooden bumboat.
@@ -135,7 +147,7 @@ function buildPatrol(teamColor) {
   g.add(mesh(buildHull({
     length: L, beam: B, draft: 0.75, freeboard: 1.5,
     sternFullness: 0.94, sheer: 0.7, bowRise: 0.7,
-  }), mat(PALETTE.hullWhite)));
+  }), hullMat(PALETTE.hullWhite, 1, 2)));
 
   // Coast-guard diagonal flash: instantly recognisable, and it is the one place
   // a strong colour is allowed that is not the team accent.
@@ -223,7 +235,7 @@ function buildDestroyer(teamColor) {
   g.add(mesh(buildHull({
     length: L, beam: B, draft: 1.6, freeboard: 2.4,
     sternFullness: 0.82, sheer: 1.5, bowRise: 0.55, stations: 20,
-  }), mat(PALETTE.hullGrey)));
+  }), hullMat(PALETTE.hullGrey, 1, 3)));
 
   // Boot topping at the waterline gives the hull visual weight.
   for (const side of [1, -1]) {
@@ -387,7 +399,7 @@ function buildMinelayer(teamColor) {
   g.add(mesh(buildHull({
     length: L, beam: B, draft: 1.2, freeboard: 1.8,
     sternFullness: 0.96, sheer: 0.9, bowRise: 0.65,
-  }), mat(PALETTE.rust)));
+  }), hullMat(PALETTE.rust, 1, 2)));
   for (const side of [1, -1]) {
     g.add(mesh(box(0.14, 0.4, L * 0.8), mat(PALETTE.black), side * (B / 2 - 0.04), 0.1, 0));
   }

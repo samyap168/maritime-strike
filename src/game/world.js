@@ -17,6 +17,7 @@ import {
 } from './geo.js';
 import { CFG } from '../config.js';
 import { getAsset } from './assets.js';
+import { panelTexture, terrainTexture, tiled } from './textures.js';
 
 const HALF = CFG.map.half;
 
@@ -243,6 +244,16 @@ export function edgePressure(x, z) {
 
 // ------------------------------------------------------------------ rendering
 
+/** Mottled terrain material — breaks up big flat facets at no triangle cost. */
+function groundMat(color, repeat = 3) {
+  return mat(color, { map: tiled(terrainTexture(), repeat, repeat) });
+}
+
+/** Plated steel for shipping and quays. */
+function steelMat(color, ru = 3, rv = 2) {
+  return mat(color, { map: tiled(panelTexture(), ru, rv) });
+}
+
 const C = {
   sand: 0xdcc9a0, grass: 0x5a9660, rock: 0x9a9a90, rockDark: 0x7c7d73,
   rockPale: 0xb0afa4, rockWarm: 0x8e8577,
@@ -258,11 +269,11 @@ function buildIslandMesh(o, r2) {
   // Beach shelf just above the waterline, then the landmass on top.
   const beach = new THREE.CylinderGeometry(o.r, o.r * 1.04, 1.2, seg);
   jitterRing(beach, r2, o.r * 0.09);
-  g.add(mesh(beach, mat(C.sand), 0, 0.35, 0));
+  g.add(mesh(beach, groundMat(C.sand, 4), 0, 0.35, 0));
 
   const land = new THREE.CylinderGeometry(o.r * 0.72, o.r * 0.94, o.h, seg);
   jitterRing(land, r2, o.r * 0.1);
-  g.add(mesh(land, mat(o.merlion ? C.concrete : C.grass), 0, o.h / 2 + 0.6, 0));
+  g.add(mesh(land, groundMat(o.merlion ? C.concrete : C.grass, 3), 0, o.h / 2 + 0.6, 0));
   return g;
 }
 
@@ -532,7 +543,7 @@ function buildMooredShip(o, r2) {
     length: L, beam: B,
     draft: o.h * 0.42, freeboard: o.h * 0.85,
     sternFullness: 0.93, sheer: B * 0.05, bowRise: 0.5, stations: 22,
-  }), mat(o.tanker ? 0x2f4f6d : 0x7a4038));
+  }), steelMat(o.cruise ? 0xe9ecef : o.tanker ? 0x2f4f6d : 0x7a4038, 2, 2));
   g.add(hull);
 
   const deckY = o.h * 0.85;
@@ -714,7 +725,7 @@ export function buildWorld(quality = 'high') {
       // and a merged scene keeps each tone as its own single draw call anyway.
       const tones = [C.rock, C.rockDark, C.rockPale, C.rockWarm];
       const tone = tones[Math.floor(rr() * tones.length)];
-      const main = mesh(buildRock(o.r * 0.86, rr), mat(tone), 0, o.r * 0.18, 0);
+      const main = mesh(buildRock(o.r * 0.86, rr), groundMat(tone, 2), 0, o.r * 0.18, 0);
       main.scale.y = 0.66 + rr() * 0.24;
       node.add(main);
       const peaks = detail ? (o.r > 13 ? 3 : 2) : 1;
@@ -744,7 +755,7 @@ export function buildWorld(quality = 'high') {
 
     else if (o.type === 'quay') {
       node = new THREE.Group();
-      node.add(mesh(cyl(o.r, o.r * 1.02, o.h, 10), mat(C.concrete), 0, o.h / 2 - 0.4, 0));
+      node.add(mesh(cyl(o.r, o.r * 1.02, o.h, 10), groundMat(C.concrete, 4), 0, o.h / 2 - 0.4, 0));
       node.add(mesh(cyl(o.r * 1.03, o.r * 1.03, 0.8, 10), mat(0x6a7078), 0, o.h - 0.5, 0));
       if (o.terminal) {
         const term = buildCruiseTerminal();

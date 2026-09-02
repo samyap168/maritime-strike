@@ -50,6 +50,10 @@ export function buildHull({
 } = {}) {
   const halfBeam = beam / 2;
   const pos = [];
+  // UVs run along the hull (u) and up from keel to deck (v). Without them a
+  // hull cannot take a plating or weathering map at all, which is most of what
+  // separates a flat-shaded shape from something that reads as built metal.
+  const uv = [];
 
   const widthAt = (t) => {
     if (t < 0.55) return 0.05 + 0.95 * Math.pow(smoothstep(clamp01(t / 0.55)), 0.75);
@@ -79,32 +83,43 @@ export function buildHull({
     });
   }
 
-  const tri = (a, b, c) => { pos.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]); };
+  // Texture repeats: a few plate courses along the length, one span keel-to-deck.
+  const uRepeat = Math.max(2, Math.round(length / 6));
+  const tri = (a, b, c) => {
+    pos.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
+    uv.push(a[3], a[4], b[3], b[4], c[3], c[4]);
+  };
   const quad = (a, b, c, d) => { tri(a, b, c); tri(a, c, d); };
 
   for (let i = 0; i < S.length - 1; i++) {
     const A = S[i], B = S[i + 1];
+    const uA = (i / (S.length - 1)) * uRepeat;
+    const uB = ((i + 1) / (S.length - 1)) * uRepeat;
     for (const side of [1, -1]) {
       const flip = side === 1;
       // Bottom panel: keel centreline out to the chine.
-      const k1 = [0, A.keelY, A.z], k2 = [0, B.keelY, B.z];
-      const c1 = [side * A.w * 0.64, A.chineY, A.z], c2 = [side * B.w * 0.64, B.chineY, B.z];
+      const k1 = [0, A.keelY, A.z, uA, 0], k2 = [0, B.keelY, B.z, uB, 0];
+      const c1 = [side * A.w * 0.64, A.chineY, A.z, uA, 0.42], c2 = [side * B.w * 0.64, B.chineY, B.z, uB, 0.42];
       // Topside panel: chine up to the deck edge.
-      const d1 = [side * A.w, A.deckY, A.z], d2 = [side * B.w, B.deckY, B.z];
+      const d1 = [side * A.w, A.deckY, A.z, uA, 1], d2 = [side * B.w, B.deckY, B.z, uB, 1];
       if (flip) { quad(k1, c1, c2, k2); quad(c1, d1, d2, c2); }
       else { quad(k1, k2, c2, c1); quad(c1, c2, d2, d1); }
     }
     // Deck surface.
-    quad([-A.w, A.deckY, A.z], [A.w, A.deckY, A.z], [B.w, B.deckY, B.z], [-B.w, B.deckY, B.z]);
+    quad([-A.w, A.deckY, A.z, uA, 0], [A.w, A.deckY, A.z, uA, 1],
+         [B.w, B.deckY, B.z, uB, 1], [-B.w, B.deckY, B.z, uB, 0]);
   }
 
   // Transom (flat stern face).
   const T = S[S.length - 1];
-  quad([0, T.keelY, T.z], [-T.w * 0.64, T.chineY, T.z], [-T.w, T.deckY, T.z], [T.w, T.deckY, T.z]);
-  tri([0, T.keelY, T.z], [T.w, T.deckY, T.z], [T.w * 0.64, T.chineY, T.z]);
+  const uT = uRepeat;
+  quad([0, T.keelY, T.z, uT, 0], [-T.w * 0.64, T.chineY, T.z, uT, 0.42],
+       [-T.w, T.deckY, T.z, uT, 1], [T.w, T.deckY, T.z, uT, 1]);
+  tri([0, T.keelY, T.z, uT, 0], [T.w, T.deckY, T.z, uT, 1], [T.w * 0.64, T.chineY, T.z, uT, 0.42]);
 
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
   return geo;
@@ -230,22 +245,31 @@ export function mergeStatic(root, keep = []) {
   root.traverse((obj) => {
     if (!obj.isMesh || obj.isInstancedMesh || isKept(obj)) return;
     const m = obj.material;
-    // Materials differing in any of these cannot share a draw call.
+    // Materials differing in any of these cannot share a draw call. The map's
+    // identity is part of that: merging a textured mesh with an untextured one
+    // would silently drop the texture from whichever lost.
     const key = [
       m.color.getHex(), m.emissive ? m.emissive.getHex() : 0,
       m.emissiveIntensity ?? 1, m.transparent ? 1 : 0, m.opacity,
+      m.map ? m.map.uuid : 'nomap',
     ].join('|');
 
     let bucket = buckets.get(key);
-    if (!bucket) { bucket = { material: m, pos: [], nrm: [] }; buckets.set(key, bucket); }
+    if (!bucket) { bucket = { material: m, pos: [], nrm: [], uv: [] }; buckets.set(key, bucket); }
 
     const geo = (obj.geometry.index ? obj.geometry.toNonIndexed() : obj.geometry.clone());
     geo.applyMatrix4(obj.matrixWorld);   // root sits at identity while building
     const pos = geo.attributes.position.array;
     const nrm = geo.attributes.normal ? geo.attributes.normal.array : null;
+    const uvA = geo.attributes.uv ? geo.attributes.uv.array : null;
     for (let i = 0; i < pos.length; i++) bucket.pos.push(pos[i]);
     if (nrm) for (let i = 0; i < nrm.length; i++) bucket.nrm.push(nrm[i]);
     else for (let i = 0; i < pos.length; i++) bucket.nrm.push(0);
+    // A geometry with no UVs still needs entries, or the attribute lengths
+    // diverge and the merged mesh renders garbage.
+    const verts = pos.length / 3;
+    if (uvA) for (let i = 0; i < uvA.length; i++) bucket.uv.push(uvA[i]);
+    else for (let i = 0; i < verts * 2; i++) bucket.uv.push(0);
     geo.dispose();
     doomed.push(obj);
   });
@@ -256,6 +280,7 @@ export function mergeStatic(root, keep = []) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(bucket.pos, 3));
     geo.setAttribute('normal', new THREE.Float32BufferAttribute(bucket.nrm, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(bucket.uv, 2));
     geo.computeBoundingSphere();
     const merged = new THREE.Mesh(geo, bucket.material);
     merged.castShadow = true;
