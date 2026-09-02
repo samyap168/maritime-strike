@@ -25,6 +25,7 @@ import { HUD } from './ui/hud.js';
 import { LobbyUI } from './ui/lobby.js';
 import { Audio } from './audio/audio.js';
 import { Voice, PRIORITY, pickLine } from './audio/voice.js';
+import { preloadAssets, assetStatus } from './game/assets.js';
 
 const HOST_PLAYER_ID = 'HOST';
 const params = new URLSearchParams(location.search);
@@ -47,10 +48,18 @@ class Game {
     this.slowFrames = 0;
     this.spectateIndex = 0;
     this.myName = randomNickname();
+    this.botSkill = 'normal';
 
     this.initRenderer();
     this.initScene();
     this.initUI();
+    // Optional GLB models load in the background. The game runs on procedural
+    // geometry immediately; anything that arrives replaces it on the next
+    // rebuild. Nobody waits on a download.
+    preloadAssets().then((s) => {
+      if (s.loaded > 0) this.hud.toast('Models loaded', `${s.loaded} of ${s.total}`, 2200);
+    });
+
     this.loop = this.loop.bind(this);
     requestAnimationFrame(this.loop);
   }
@@ -142,6 +151,10 @@ class Game {
       onStart: () => this.hostStart(),
       onPlayAgain: () => this.hostPlayAgain(),
       onKick: (id) => this.hostKick(id),
+      onAddBot: () => this.hostAddBot(),
+      onRemoveBot: () => this.hostRemoveBot(),
+      onSolo: () => this.startSolo(),
+      onSkill: (s) => { this.botSkill = s; },
     });
 
     if (params.get('room')) {
@@ -412,6 +425,52 @@ class Game {
   }
 
   hostStart() { if (this.role === 'host' && this.sim.start()) this.flushEvents(); }
+
+  hostAddBot() {
+    if (this.role !== 'host') return;
+    if (Object.keys(this.sim.players).length >= 16) {
+      this.hud.toast('Roster full', '16 is the cap', 1600);
+      return;
+    }
+    this.sim.addBot(this.botSkill);
+    this.broadcastLobby();
+  }
+
+  hostRemoveBot() {
+    if (this.role !== 'host') return;
+    if (!this.sim.removeBot()) this.hud.toast('No bots', 'Nothing to remove', 1400);
+    this.broadcastLobby();
+  }
+
+  /**
+   * Single player: a full match against bots, with no networking at all.
+   *
+   * Same authoritative simulation the multiplayer host runs — the transport is
+   * simply a stub. That means practising solo exercises the identical code path
+   * a real match uses, so it is a genuine rehearsal rather than a separate mode
+   * that can rot.
+   */
+  startSolo() {
+    this.role = 'host';
+    this.localId = HOST_PLAYER_ID;
+    this.roomCode = 'SOLO';
+    this.sim = new HostSim();
+    this.transport = { pings: new Map(), broadcast() {}, send() {}, on() {}, mode: 'solo', peers: new Map() };
+
+    const me = this.sim.addPlayer(HOST_PLAYER_ID, this.myName);
+    this.sim.setReady(HOST_PLAYER_ID, true);
+
+    // 7 v 8: you plus seven on your side, eight against.
+    for (let i = 0; i < 7; i++) this.sim.addBot(this.botSkill, me.team);
+    const foe = me.team === 'red' ? 'blue' : 'red';
+    for (let i = 0; i < 8; i++) this.sim.addBot(this.botSkill, foe);
+
+    this.startHostClock();
+    this.ui.hideAll();
+    this.audio.init();
+    if (this.sim.start()) this.flushEvents();
+    this.hud.toast('Single player', `15 bots · ${this.botSkill}`, 2600);
+  }
   hostPlayAgain() { if (this.role === 'host') { this.sim.returnToLobby(); this.flushEvents(); this.broadcastLobby(); } }
   hostKick(id) {
     if (this.role !== 'host') return;
@@ -1035,6 +1094,9 @@ class Game {
       this.renderer.shadowMap.enabled = false;
       this.renderer.setPixelRatio(1);
       this.scene.fog.far = 900;
+      // The ocean is the whole screen, so its fragment cost dominates on weak
+      // hardware. Dropping shadows alone does not save a struggling laptop.
+      this.water.setQuality(false);
       console.info('[perf] dropped to low quality');
       if (this.hud) this.hud.toast('Graphics', 'Reduced for smoother play', 2600);
     }

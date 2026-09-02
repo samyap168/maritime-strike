@@ -16,6 +16,7 @@ import {
   mat, mesh, box, cyl, cone, buildRock, buildPalm, buildHull, mergeStatic, mulberry32,
 } from './geo.js';
 import { CFG } from '../config.js';
+import { getAsset } from './assets.js';
 
 const HALF = CFG.map.half;
 
@@ -286,6 +287,8 @@ function jitterRing(geo, r2, amount) {
  * at sea level these read long before any building does.
  */
 function buildSupertrees(r2) {
+  const imported = getAsset('landmark.supertrees');
+  if (imported) return imported;
   const g = new THREE.Group();
   const trunkMat = mat(0x6d5a4a);
   const ribMat = mat(0x8e2f3f);
@@ -336,6 +339,8 @@ function buildSupertrees(r2) {
 
 /** ArtScience Museum: the lotus. Ten upward-tilted petals around a low base. */
 function buildLotus() {
+  const imported = getAsset('landmark.artscience');
+  if (imported) return imported;
   const g = new THREE.Group();
   g.add(mesh(cyl(9, 11, 3, 12), mat(0xe8eaed), 0, 1.5, 0));
   for (let i = 0; i < 10; i++) {
@@ -351,6 +356,8 @@ function buildLotus() {
 
 /** Esplanade: the twin spiked domes. */
 function buildEsplanade() {
+  const imported = getAsset('landmark.esplanade');
+  if (imported) return imported;
   const g = new THREE.Group();
   for (const dx of [-13, 13]) {
     const dome = new THREE.Mesh(
@@ -372,6 +379,8 @@ function buildEsplanade() {
 
 /** Sentosa cable car: two pylons and a run of cabins. */
 function buildCableCar() {
+  const imported = getAsset('landmark.cableCar');
+  if (imported) return imported;
   const g = new THREE.Group();
   const towers = [[-58, -40, 52], [46, 34, 44]];
   for (const [x, z, h] of towers) {
@@ -398,6 +407,8 @@ function buildCableCar() {
 
 /** Cruise terminal: a long wave-roofed shed on the quay. */
 function buildCruiseTerminal() {
+  const imported = getAsset('landmark.cruiseTerminal');
+  if (imported) return imported;
   const g = new THREE.Group();
   g.add(mesh(box(60, 9, 26), mat(0xe4e7ea), 0, 4.5, 0));
   for (let i = 0; i < 5; i++) {
@@ -414,6 +425,8 @@ function buildCruiseTerminal() {
 
 /** Marina Bay: three towers under a sky-deck, plus an observation wheel. */
 function buildMarinaSkyline(r2) {
+  const imported = getAsset('landmark.mbs');
+  if (imported) return imported;
   const g = new THREE.Group();
   // Marina Bay Sands. Slim, tall and slightly splayed at the base, with the
   // SkyPark laid across all three — the one silhouette everybody recognises.
@@ -447,6 +460,8 @@ function buildMarinaSkyline(r2) {
 }
 
 function buildWheel() {
+  const imported = getAsset('landmark.flyer');
+  if (imported) { imported.userData.wheel = imported; return imported; }
   const g = new THREE.Group();
   const R = 26;
   const rim = new THREE.TorusGeometry(R, 0.7, 5, 24);
@@ -469,6 +484,8 @@ function buildWheel() {
 }
 
 function buildMerlion() {
+  const imported = getAsset('landmark.merlion');
+  if (imported) return imported;
   const g = new THREE.Group();
   g.add(mesh(cyl(6, 7, 2.4, 10), mat(C.concrete), 0, 1.2, 0));
   const body = mesh(cone(3.2, 9, 8), mat(C.white), 0, 6.5, 0);
@@ -480,6 +497,8 @@ function buildMerlion() {
 }
 
 function buildCrane() {
+  const imported = getAsset('port.quayCrane');
+  if (imported) return imported;
   const g = new THREE.Group();
   // PSA's quay cranes are the tallest thing on the western skyline; short ones
   // read as scaffolding rather than a container terminal.
@@ -503,6 +522,9 @@ function buildCrane() {
  * completely, and a lower tanker you can shoot over but not through.
  */
 function buildMooredShip(o, r2) {
+  const slot = o.cruise ? 'port.cruiseShip' : o.tanker ? 'port.tanker' : 'port.containerShip';
+  const imported = getAsset(slot);
+  if (imported) { imported.rotation.y = o.angle; return imported; }
   const g = new THREE.Group();
   const L = o.length, B = o.beam;
 

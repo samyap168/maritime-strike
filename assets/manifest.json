@@ -1,0 +1,4 @@
+{
+  "_comment": "List the asset keys you have actually placed a .glb for. Anything not listed is never requested, so the console stays clean. Keys come from MANIFEST in src/game/assets.js.",
+  "present": []
+}

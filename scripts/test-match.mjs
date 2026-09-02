@@ -15,6 +15,31 @@ async function newPage(tag) {
 }
 const host = await newPage('host'), c1 = await newPage('c1');
 
+/**
+ * Wait until a world point's screen projection stops moving, then return it.
+ *
+ * The chase camera eases toward its target, so straight after anything is
+ * teleported the projection is still mid-flight. Under software rendering that
+ * ease takes seconds, and a fixed sleep silently yielded an aim point out over
+ * open water: the shots missed and the failure looked like a game bug rather
+ * than a fragile test.
+ */
+async function settledAim(page, bodySrc) {
+  let last = null;
+  for (let i = 0; i < 60; i++) {
+    const s = await page.evaluate((src) => {
+      const g = window.__game;
+      // eslint-disable-next-line no-new-func
+      const w = new Function('g', src)(g);
+      return w ? g.hud.toScreen(w.x, 2, w.z) : null;
+    }, bodySrc);
+    if (s && last && Math.abs(s.x - last.x) < 2 && Math.abs(s.y - last.y) < 2) return s;
+    last = s;
+    await page.waitForTimeout(250);
+  }
+  return last;
+}
+
 await host.goto(BASE + '/?net=ws', { waitUntil: 'load' });
 await host.waitForTimeout(3500);
 await host.click('#btn-create');
@@ -97,11 +122,14 @@ await host.evaluate(() => {
   target.x = me.x + Math.sin(me.h) * 45; target.z = me.z + Math.cos(me.h) * 45; target.hp = 40;
   me.v = 'patrol'; me.cd = 0;
 });
-await host.waitForTimeout(400);
-const aim = await host.evaluate(() => { const g=window.__game,me=g.sim.players[g.localId];
-  const foe=Object.values(g.sim.players).find(p=>p.team!==me.team); return g.hud.toScreen(foe.x,2,foe.z); });
+const aim = await settledAim(host, `
+  const me = g.sim.players[g.localId];
+  const foe = Object.values(g.sim.players).find(p => p.team !== me.team && p.id !== 'SURV');
+  return foe ? { x: foe.x, z: foe.z } : null;
+`);
 await host.mouse.move(aim.x, aim.y);
-await host.mouse.down(); await host.waitForTimeout(3000); await host.mouse.up();
+// Long enough to land a burst even at software-rendering frame rates.
+await host.mouse.down(); await host.waitForTimeout(6000); await host.mouse.up();
 await host.waitForTimeout(400);
 await c1.bringToFront();
 await c1.waitForTimeout(900);

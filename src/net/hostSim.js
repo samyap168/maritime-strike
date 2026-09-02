@@ -14,6 +14,7 @@ import {
   createMine, stepMine, muzzleOffset,
 } from '../game/weapons.js';
 import { EV } from './protocol.js';
+import { createBotState, stepBot, botName } from '../game/bots.js';
 
 export const PHASE = { LOBBY: 'lobby', COUNTDOWN: 'countdown', MATCH: 'match', END: 'end' };
 
@@ -34,6 +35,34 @@ export class HostSim {
   }
 
   // ------------------------------------------------------------------ lobby
+
+  /**
+   * Add a bot. It is a normal player with a brain attached — same struct, same
+   * physics, same weapon rules — so nothing downstream needs to know.
+   */
+  addBot(skill = 'normal', team = null) {
+    const id = `BOT${this.nextBotId = (this.nextBotId || 0) + 1}`;
+    const p = this.addPlayer(id, botName());
+    p.bot = createBotState(skill);
+    p.ready = true;
+    if (team) p.team = team;
+    return p;
+  }
+
+  removeBot() {
+    const ids = Object.keys(this.players).filter((id) => this.players[id].bot);
+    if (!ids.length) return false;
+    // Drop from the larger side so removing one does not unbalance the match.
+    const counts = this.teamCounts();
+    const heavier = counts.red >= counts.blue ? 'red' : 'blue';
+    const pick = ids.find((id) => this.players[id].team === heavier) || ids[ids.length - 1];
+    delete this.players[pick];
+    return true;
+  }
+
+  botCount() {
+    return Object.keys(this.players).filter((id) => this.players[id].bot).length;
+  }
 
   addPlayer(id, name) {
     if (this.players[id]) { this.players[id].c = true; return this.players[id]; }
@@ -116,7 +145,8 @@ export class HostSim {
   startBlocker() {
     const ids = Object.keys(this.players).filter((id) => this.players[id].c);
     if (ids.length < CFG.match.minPlayers) return `Need at least ${CFG.match.minPlayers} players`;
-    const notReady = ids.filter((id) => !this.players[id].ready).length;
+    if (!ids.some((id) => !this.players[id].bot)) return 'Need at least one human';
+    const notReady = ids.filter((id) => !this.players[id].ready && !this.players[id].bot).length;
     if (notReady > 0) return `${notReady} player${notReady > 1 ? 's' : ''} not ready`;
     const c = this.teamCounts();
     if (Math.abs(c.red - c.blue) > 1) return 'Teams are unbalanced';
@@ -161,10 +191,11 @@ export class HostSim {
     for (const id in this.players) {
       const p = this.players[id];
       if (!p.c) { delete this.players[id]; continue; }
-      p.ready = false;
+      p.ready = !!p.bot;
       p.a = false;
       p.v = 'sampan';
       p.hp = CFG.player.maxHp;
+      if (p.bot) p.bot = createBotState(p.bot.skillName || 'normal');
     }
     this.pushEvent(EV.PHASE, { phase: this.phase });
   }
@@ -211,6 +242,17 @@ export class HostSim {
     for (const id in this.players) {
       const p = this.players[id];
       if (!p.a) continue;
+
+      // Bots produce the same input a client would send, so everything below
+      // this line — movement, firing, cooldowns — is identical for both.
+      if (p.bot) {
+        const input = stepBot(p.bot, p, this.players, this.mines, this.pickups, dt);
+        p.input.throttle = Math.max(-1, Math.min(1, input.throttle));
+        p.input.turn = Math.max(-1, Math.min(1, input.turn));
+        p.input.aim = input.aim;
+        p.input.fire = input.fire;
+        p.input.alt = input.alt;
+      }
 
       // Submarine dive is a hold, and only the submarine has it.
       p.d = p.v === 'submarine' && p.input.alt;
@@ -437,6 +479,7 @@ export class HostSim {
     const players = Object.values(this.players).map((p) => ({
       id: p.id, name: p.name, team: p.team, ready: p.ready,
       connected: p.c, ping: pings.get(p.id) || 0, isHost: p.id === hostId,
+      bot: !!p.bot,
     }));
     return { players, blocker: this.startBlocker(), phase: this.phase };
   }

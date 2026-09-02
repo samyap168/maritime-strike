@@ -21,6 +21,7 @@ export const MSG = {
   SET_READY: 'rdy',
   START: 'start',
   KICK: 'kick',
+  SET_BOTS: 'bots',
   PING: 'ping',
 
   // host -> client

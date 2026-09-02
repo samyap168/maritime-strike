@@ -91,6 +91,7 @@ const FRAG = /* glsl */`
   uniform float uFogNear;
   uniform float uFogFar;
   uniform sampler2D uRipple;
+  uniform float uQuality;   // 1 = full, 0 = reduced fragment work
 
   varying vec3 vWorld;
   varying float vHeight;
@@ -124,8 +125,14 @@ const FRAG = /* glsl */`
     // glass. Faded out with distance or it aliases into shimmer at the horizon.
     float detail = 1.0 - smoothstep(140.0, 700.0, dist);
     vec2 rn1 = texture2D(uRipple, p * 0.026 + vec2(uTime * 0.011, uTime * 0.007)).xy * 2.0 - 1.0;
-    vec2 rn2 = texture2D(uRipple, p * 0.071 + vec2(-uTime * 0.019, uTime * 0.013)).xy * 2.0 - 1.0;
-    vec2 chop = (rn1 * 0.85 + rn2 * 0.55) * detail;
+    vec2 chop = rn1 * 0.85;
+    if (uQuality > 0.5) {
+      // Second, finer chop octave. First to go when the frame budget is tight:
+      // it is the least visible per unit of cost.
+      vec2 rn2 = texture2D(uRipple, p * 0.071 + vec2(-uTime * 0.019, uTime * 0.013)).xy * 2.0 - 1.0;
+      chop += rn2 * 0.55;
+    }
+    chop *= detail;
 
     vec3 n = normalize(vec3(-dhx + chop.x * 0.42, 1.0, -dhz + chop.y * 0.42));
 
@@ -136,11 +143,10 @@ const FRAG = /* glsl */`
     // Warping the lookup coordinate with noise before sampling makes the same
     // mask produce an irregular, organic shoreline for the cost of two noise
     // taps, and it fixes the shelf boundary and the foam band together.
-    vec2 warp = vec2(
-      noise(p * 0.030 + vec2(uTime * 0.02, 0.0)),
-      noise(p * 0.030 + vec2(17.3, 41.9))
-    ) - 0.5;
-    vec2 warped = p + warp * 34.0 + vec2(noise(p * 0.11) - 0.5, noise(p * 0.11 + 7.1) - 0.5) * 9.0;
+    // Warp from the ripple map rather than from noise(): one texture tap that
+    // is already bound, instead of four noise calls at four sin/fract ops each.
+    vec2 warp = texture2D(uRipple, p * 0.0035 + vec2(uTime * 0.004, 0.0)).xy - 0.5;
+    vec2 warped = p + warp * 46.0;
     vec2 uv = (warped / (uHalf * 2.0)) + 0.5;
     vec2 shore = vec2(0.0);
     if (uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0) shore = texture2D(uShore, uv).rg;
@@ -151,10 +157,16 @@ const FRAG = /* glsl */`
 
     // Sky reflection along the reflected ray, weighted by Fresnel. This is what
     // makes water read as a liquid surface rather than a coloured plane.
-    vec3 refl = reflect(-view, n);
-    refl.y = abs(refl.y);
     float fres = 0.02 + 0.98 * pow(1.0 - max(dot(n, view), 0.0), 5.0);
-    col = mix(col, skyAt(refl), clamp(fres, 0.0, 0.86));
+    if (uQuality > 0.5) {
+      vec3 refl = reflect(-view, n);
+      refl.y = abs(refl.y);
+      col = mix(col, skyAt(refl), clamp(fres, 0.0, 0.86));
+    } else {
+      // Reduced: a flat horizon tint instead of a reflected ray. Keeps the
+      // wet look without the reflect() and the second gradient evaluation.
+      col = mix(col, uSkyHorizon, clamp(fres, 0.0, 0.55));
+    }
 
     // Sun: a tight highlight for the specular, and a broad one for the glitter
     // path that runs from the sun to the viewer.
@@ -170,12 +182,13 @@ const FRAG = /* glsl */`
     // amplitude is about 1.46m). Threshold it near the middle instead and
     // roughly half the wave cycle turns white, which reads as a foaming
     // storm rather than a calm strait.
-    float crest = smoothstep(0.54, 0.73, vHeight + noise(p * 0.09 + uTime * 0.12) * 0.10);
+    float grain = noise(p * 0.09 + uTime * 0.12);
+    float crest = smoothstep(0.54, 0.73, vHeight + grain * 0.10);
     float ripple = sin(p.x * 0.30 + uTime * 2.1) * sin(p.y * 0.27 - uTime * 1.7);
     float shoreFoam = smoothstep(0.30, 0.62, shore.r + ripple * 0.09) *
                       (1.0 - smoothstep(0.80, 0.97, shore.r));
     float foam = clamp(max(shoreFoam * 0.78, crest * 0.34 * detail), 0.0, 1.0);
-    foam *= 0.42 + 0.58 * noise(p * 0.42 + uTime * 0.55);
+    foam *= 0.42 + 0.58 * grain;
     col = mix(col, vec3(0.95, 0.98, 1.0), foam);
 
     col = mix(col, uFogColor, smoothstep(uFogNear, uFogFar, dist));
@@ -232,6 +245,7 @@ export class Water {
       uFogNear: { value: 450 },
       uFogFar: { value: 1240 },
       uRipple: { value: makeRippleNormal(256) },
+      uQuality: { value: quality === 'high' ? 1 : 0 },
     };
 
     this.material = new THREE.ShaderMaterial({
@@ -247,6 +261,9 @@ export class Water {
   }
 
   update(t) { this.uniforms.uTime.value = t; }
+
+  /** Called by the automatic quality drop when frame time stays poor. */
+  setQuality(high) { this.uniforms.uQuality.value = high ? 1 : 0; }
 
   dispose() {
     this.mesh.geometry.dispose();

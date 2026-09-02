@@ -9,7 +9,8 @@
     "serve": "node server/relay.js",
     "test": "node scripts/test-match.mjs",
     "test:weapons": "node scripts/test-weapons.mjs",
-    "test:smoke": "node scripts/test-smoke.mjs"
+    "test:smoke": "node scripts/test-smoke.mjs",
+    "test:solo": "node scripts/test-solo.mjs"
   },
   "engines": {
     "node": ">=16"

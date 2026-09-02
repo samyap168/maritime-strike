@@ -17,6 +17,7 @@ import {
   buildHull, buildGunMount, buildMast, buildRailing, buildBollard, buildRing, mergeStatic,
 } from './geo.js';
 import { VESSELS } from '../config.js';
+import { getAsset } from './assets.js';
 
 const PALETTE = {
   wood: 0x9c7047, woodDark: 0x6d4c29, canvas: 0xd9cbb0,
@@ -472,6 +473,26 @@ const BUILDERS = {
 };
 
 export function buildVessel(kind, teamColor) {
+  // A dropped-in GLB overrides the procedural hull. Team markings are still
+  // added procedurally on top, because a downloaded model has no idea which
+  // side it is fighting for — and team identification is gameplay, not decor.
+  const model = getAsset(`vessel.${kind}`);
+  if (model) {
+    const def = VESSELS[kind];
+    const g = new THREE.Group();
+    g.add(model);
+    addTeamMarkings(g, teamColor, def.length, def.beam, def.beam * 0.4);
+    // The turret is an empty anchor on an imported model: we cannot know which
+    // part of someone else's mesh is the gun, so aiming rotates nothing and the
+    // hull heading carries the read instead.
+    g.userData.turret = new THREE.Group();
+    g.add(g.userData.turret);
+    g.userData.spinners = [];
+    g.userData.kind = kind;
+    g.userData.imported = true;
+    g.userData.wake = new THREE.Vector3(0, 0.1, -def.length * 0.45);
+    return g;
+  }
   return (BUILDERS[kind] || buildSampan)(teamColor);
 }
 

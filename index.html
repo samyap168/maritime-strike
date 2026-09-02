@@ -30,8 +30,15 @@
       <p class="subtitle">Team naval combat &middot; Singapore waters</p>
     </div>
     <div class="stack">
-      <button class="btn" id="btn-create">Create Game</button>
+      <button class="btn" id="btn-solo">Single Player</button>
+      <button class="btn ghost" id="btn-create">Create Game</button>
       <button class="btn ghost" id="btn-join-screen">Join Game</button>
+    </div>
+    <div class="row" id="solo-opts">
+      <span class="hint">Bot skill</span>
+      <button class="btn ghost small" data-skill="easy">Easy</button>
+      <button class="btn small" data-skill="normal">Normal</button>
+      <button class="btn ghost small" data-skill="hard">Hard</button>
     </div>
     <p class="hint" id="landing-hint">One host, up to 16 players, nothing to install</p>
     <p class="error" id="landing-error"></p>
@@ -88,6 +95,8 @@
         </div>
         <div class="row">
           <input class="field" id="in-nick" style="width:190px;font-size:15px;padding:10px 14px" maxlength="12" spellcheck="false">
+          <button class="btn ghost small" id="btn-bot-remove" title="Remove a bot">&minus; Bot</button>
+          <button class="btn ghost small" id="btn-bot-add" title="Add a bot">+ Bot</button>
           <button class="btn ghost small" id="btn-switch">Switch team</button>
           <button class="btn small" id="btn-ready">Ready up</button>
           <button class="btn small hidden" id="btn-start">Start game</button>

@@ -29,6 +29,17 @@ export class LobbyUI {
     $('btn-copy-link').onclick = () => this._copy(this.shareLink(), 'btn-copy-link', 'Copy link');
 
     $('btn-ready').onclick = () => this.h.onToggleReady();
+    $('btn-bot-add').onclick = () => this.h.onAddBot();
+    $('btn-bot-remove').onclick = () => this.h.onRemoveBot();
+    $('btn-solo').onclick = () => this.h.onSolo();
+    for (const b of document.querySelectorAll('#solo-opts [data-skill]')) {
+      b.onclick = () => {
+        this.h.onSkill(b.dataset.skill);
+        for (const o of document.querySelectorAll('#solo-opts [data-skill]')) {
+          o.classList.toggle('ghost', o !== b);
+        }
+      };
+    }
     $('btn-switch').onclick = () => this.h.onSwitchTeam();
     $('btn-start').onclick = () => this.h.onStart();
     $('btn-again').onclick = () => this.h.onPlayAgain();
@@ -120,6 +131,7 @@ export class LobbyUI {
 
       const tags = [];
       if (p.isHost) tags.push('<span class="tag host">Host</span>');
+      if (p.bot) tags.push('<span class="tag bot">Bot</span>');
       tags.push(p.ready
         ? '<span class="tag rdy">Ready</span>'
         : '<span class="tag not">Not ready</span>');
@@ -128,7 +140,7 @@ export class LobbyUI {
       el.innerHTML = `<span class="nm">${escapeHtml(p.name)}</span>${tags.join('')}`;
 
       // The host gets a kick, so one frozen laptop cannot hold the room hostage.
-      if (this.isHost && p.id !== this.localId) {
+      if (this.isHost && p.id !== this.localId && !p.bot) {
         const k = document.createElement('button');
         k.className = 'btn ghost small';
         k.style.padding = '2px 8px';
@@ -157,6 +169,10 @@ export class LobbyUI {
       $('btn-switch').className = `btn small ${me.team === 'red' ? 'blue' : 'red'}`;
       if (document.activeElement !== $('in-nick')) $('in-nick').value = me.name;
     }
+
+    // Bot buttons are the host's alone.
+    $('btn-bot-add').classList.toggle('hidden', !this.isHost);
+    $('btn-bot-remove').classList.toggle('hidden', !this.isHost);
 
     if (this.isHost) {
       const btn = $('btn-start');
